@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared
+        run: pnpm --filter @sc-panel/shared build
+
+      - name: Build web
+        run: pnpm --filter @sc-panel/web build
+
+      - name: Copy web build to api public
+        run: |
+          mkdir -p apps/api/public
+          cp -r apps/web/.output/public/* apps/api/public/
+
+      - name: Build api
+        run: pnpm --filter @sc-panel/api build
+
+      - name: Install pkg
+        run: pnpm add -g pkg
+
+      - name: Package Linux x64 binary
+        run: |
+          cd apps/api
+          pkg . --targets node24-linux-x64 --output dist/scsm-linux-x64 --compress GZip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/api/dist/scsm-linux-x64
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.output/
+.nuxt/
+.nitro/
+.cache/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# panel runtime data
+data/
+!data/.gitkeep
+
+# logs
+*.log
+logs/
+
+# test / coverage
+coverage/
+test-results/
+playwright-report/
+blob-report/
+e2e-report/
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

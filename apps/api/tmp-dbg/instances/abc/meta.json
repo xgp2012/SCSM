@@ -1,0 +1,18 @@
+{
+  "id": "abc",
+  "name": "X",
+  "source": "template",
+  "dir": "D:/x",
+  "serverPort": 1,
+  "version": "v",
+  "launchArgs": [
+    "--enhanced"
+  ],
+  "worldPath": "app:/Worlds/World",
+  "worldName": "W",
+  "maxPlayers": 20,
+  "autoRestart": false,
+  "autoStart": false,
+  "autoRun": true,
+  "createdAt": "now"
+}

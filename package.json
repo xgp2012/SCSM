@@ -1,0 +1,25 @@
+{
+  "name": "sc-panel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SurvivalcraftNet 全栈开服面板 (Nuxt4 SPA + NestJS + node-pty)",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "dev:api": "pnpm --filter @sc-panel/api dev",
+    "dev:web": "pnpm --filter @sc-panel/web dev",
+    "build": "pnpm --filter @sc-panel/shared build && pnpm -r --filter !@sc-panel/shared build",
+    "build:shared": "pnpm --filter @sc-panel/shared build",
+    "typecheck": "pnpm --filter @sc-panel/shared build && pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @sc-panel/web test:e2e",
+    "clean": "pnpm -r exec node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
