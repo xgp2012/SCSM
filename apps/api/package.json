@@ -60,7 +60,10 @@
     "vitest": "^3.0.0"
   },
   "pkg": {
-    "scripts": ["dist/**/*.js"],
+    "scripts": [
+      "dist/**/*.js",
+      "node_modules/**/*.js"
+    ],
     "assets": [
       "public/**/*",
       "node_modules/node-pty/**/*"

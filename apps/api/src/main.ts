@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
-import { NestExpressApplication } from '@nestjs/platform-express';
+import { ExpressAdapter } from '@nestjs/platform-express';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { WsAdapter } from '@nestjs/platform-ws';
 import cookieParser from 'cookie-parser';
 import { join } from 'path';
@@ -15,9 +16,11 @@ async function bootstrap(): Promise<void> {
   const env = parseEnv(process.env);
   const logger = new Logger('Bootstrap');
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    bufferLogs: true,
-  });
+  const app = await NestFactory.create<NestExpressApplication>(
+    AppModule,
+    new ExpressAdapter(),
+    { bufferLogs: true },
+  );
 
   app.setGlobalPrefix('api');
   app.useWebSocketAdapter(new WsAdapter(app));
