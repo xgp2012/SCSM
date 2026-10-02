@@ -44,7 +44,7 @@ jobs:
       - name: Deploy api (self-contained, hoisted node_modules)
         run: |
           mkdir -p deploy
-          pnpm --filter @sc-panel/api deploy --prod deploy/api
+          pnpm --filter @sc-panel/api deploy --prod --legacy --config.node-linker=hoisted deploy/api
           cp -r apps/api/dist deploy/api/dist
           cp -r apps/api/public deploy/api/public
 
