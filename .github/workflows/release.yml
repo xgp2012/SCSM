@@ -41,18 +41,24 @@ jobs:
       - name: Build api
         run: pnpm --filter @sc-panel/api build
 
-      - name: Install pkg
-        run: pnpm add -g pkg
+      - name: Deploy api (self-contained, hoisted node_modules)
+        run: |
+          mkdir -p deploy
+          pnpm --filter @sc-panel/api deploy --prod deploy/api
+          cp -r apps/api/dist deploy/api/dist
+          cp -r apps/api/public deploy/api/public
 
       - name: Package Linux x64 binary
         run: |
-          cd apps/api
-          pkg . --targets node24-linux-x64 --output dist/scsm-linux-x64 --compress GZip
+          npx --yes @yao-pkg/pkg@6.23.0 deploy/api \
+            --targets node24-linux-x64 \
+            --output dist/scsm-linux-x64 \
+            --compress GZip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: apps/api/dist/scsm-linux-x64
+          files: dist/scsm-linux-x64
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

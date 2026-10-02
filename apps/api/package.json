@@ -4,6 +4,7 @@
   "private": true,
   "type": "commonjs",
   "main": "dist/main.js",
+  "bin": "dist/main.js",
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
@@ -57,5 +58,14 @@
     "typescript-eslint": "^8.0.0",
     "unplugin-swc": "^2.0.0",
     "vitest": "^3.0.0"
+  },
+  "pkg": {
+    "scripts": ["dist/**/*.js"],
+    "assets": [
+      "public/**/*",
+      "node_modules/node-pty/**/*"
+    ],
+    "targets": ["node24-linux-x64"],
+    "outputPath": "dist"
   }
 }
