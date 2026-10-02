@@ -21,15 +21,5 @@
   },
   "devDependencies": {
     "typescript": "^5.7.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@swc/core",
-      "@tailwindcss/oxide",
-      "better-sqlite3",
-      "esbuild",
-      "node-pty",
-      "unrs-resolver"
-    ]
   }
 }
