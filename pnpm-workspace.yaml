@@ -2,17 +2,12 @@ packages:
   - "apps/*"
   - "packages/*"
 
-allowBuilds:
-  '@swc/core': set this to true or false
-  esbuild: true
-  node-pty: set this to true or false
-  unrs-resolver: true
-
 onlyBuiltDependencies:
-  - esbuild
-  - unrs-resolver
+  - "@swc/core"
   - "@tailwindcss/oxide"
   - better-sqlite3
+  - esbuild
   - node-pty
+  - unrs-resolver
 
 verifyDepsBeforeRun: false
