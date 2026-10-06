@@ -61,8 +61,7 @@
   },
   "pkg": {
     "scripts": [
-      "dist/**/*.js",
-      "node_modules/**/*.js"
+      "dist/**/*.js"
     ],
     "assets": [
       "public/**/*",

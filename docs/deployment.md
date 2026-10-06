@@ -170,15 +170,19 @@ PANEL_DATA_DIR=./data SERVER_TEMPLATE_DIR=/path/to/服务端本体 ./scsm-linux-
 - `main.ts` 中**显式传 `new ExpressAdapter()`**，否则 NestJS 动态 `require`
   `@nestjs/platform-express`，pkg 静态分析不到，运行时报
   `No driver (HTTP) has been selected`。
-- **动态依赖必须显式静态 `require`**：仅靠 `pkg.scripts` 里的 `node_modules/**/*.js`
-  通配**不足以**保证被收录（该通配只遍历 pkg 已解析到的模块）。`main.ts` 中已显式
-  `require('class-validator')` / `require('class-transformer')`——`ValidationPipe`
-  经 `loadPackage()` 动态加载它们，否则运行时启动即报
-  `ERROR [PackageLoader] The "class-validator" package is missing`。
-  新增此类「运行时动态加载」的依赖时，需同样补一条显式 `require`。
+- **依赖收录靠显式 `require`，不要用 `node_modules/**/*.js` 通配**：`ValidationPipe`
+  经 `loadPackage()` 动态加载 `class-validator`/`class-transformer`，pkg 静态分析不到；
+  已在 `main.ts` 显式 `require` 二者（新增此类「运行时动态加载」的依赖时同样要补）。
+  **切勿**在 `pkg.scripts` 中加 `node_modules/**/*.js`：该通配会强制 pkg 对
+  `class-validator` 的 `esm5/`、`esm2015/` 等 ESM 变体逐文件生成 V8 字节码，而 ESM
+  语法字节码生成会**大面积失败**（实测 452 条 `Failed to generate V8 bytecode` 警告），
+  产出的二进制启动时触发 V8 致命错误：
+  `Check failed: i::Script::GetPositionInfo(...)` → `V8_Fatal` 崩溃。
+  实测对比：`scripts: ["dist/**/*.js"]`（配合显式 require）= **0** 条字节码警告且运行正常；
+  追加 `node_modules/**/*.js` = **452** 条警告 + 启动崩溃。
 - `node-pty` 为原生模块，通过 `pkg.assets` 纳入；目标机首次运行会解压原生 `.node`。
 - 发布流程含 **Smoke test**：启动打包产物并对 `GET /api/health` 探活，同时断言日志中
-  不含 `class-validator` 缺失错误，防止该缺陷再次流入 Release。
+  不含 `class-validator` 缺失错误与 V8 致命错误，防止缺陷再次流入 Release。
 
 > 若目标环境对单文件二进制有兼容问题，可退回「源码部署」或 tarball 分发。
 

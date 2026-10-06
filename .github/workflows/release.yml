@@ -56,25 +56,52 @@ jobs:
             --compress GZip
 
       - name: Smoke test binary
+        shell: bash
         run: |
-          # 回归防护：旧版二进制缺少 class-validator（NestJS 动态 require，pkg 静态分析不到），
-          # 启动即 `ERROR [PackageLoader] The "class-validator" package is missing`。
-          # 此处启动二进制并对 /api/health 探活；失败则不发布。
+          set -uo pipefail
+          # 回归防护：二进制必须能真正启动并对外提供 /api/health。
+          # 已捕获的两类缺陷：
+          #   1) 缺 class-validator（NestJS 动态 require，pkg 静态分析不到）
+          #      → `ERROR [PackageLoader] The "class-validator" package is missing`
+          #   2) pkg 对 ESM 变体字节码化失败
+          #      → `Check failed: i::Script::GetPositionInfo(...)` / `V8_Fatal` 崩溃
+          rm -f smoke.log health.json
           PANEL_PORT=3999 PANEL_DATA_DIR="$PWD/smoke-data" \
             ./dist/scsm-linux-x64 > smoke.log 2>&1 &
           APP_PID=$!
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3999/api/health > health.json 2>/dev/null; then break; fi
-            if ! kill -0 "$APP_PID" 2>/dev/null; then break; fi
+
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3999/api/health -o health.json 2>/dev/null; then
+              ok=1; break
+            fi
+            rm -f health.json
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              wait "$APP_PID"; echo "::error::二进制在启动过程中退出（exit=$?）"; break
+            fi
             sleep 1
           done
-          echo "--- smoke.log ---"; cat smoke.log
-          echo "--- health.json ---"; cat health.json 2>/dev/null || true
+
           kill "$APP_PID" 2>/dev/null || true
-          if grep -q 'class-validator' smoke.log; then
-            echo "::error::class-validator 未被打包"; exit 1
+          wait "$APP_PID" 2>/dev/null || true
+
+          echo "===== smoke.log ====="
+          cat smoke.log || true
+          echo "===== health.json ====="
+          cat health.json 2>/dev/null || echo "(未取得健康检查响应)"
+
+          if [ "$ok" -ne 1 ]; then
+            if grep -q 'class-validator' smoke.log; then
+              echo "::error::class-validator 未被打包（检查 main.ts 显式 require 与 pkg.scripts）"
+            elif grep -qE 'V8_Fatal|GetPositionInfo|Fatal error' smoke.log; then
+              echo "::error::V8 崩溃——pkg 字节码化失败（检查 pkg.scripts 是否含 node_modules/**/*.js 通配）"
+            else
+              echo "::error::二进制未能在 30s 内响应 /api/health"
+            fi
+            exit 1
           fi
           grep -q '"status":"ok"' health.json
+          echo "Smoke test 通过：二进制启动正常且 /api/health 响应正常"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
