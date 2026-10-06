@@ -60,20 +60,24 @@ jobs:
         run: |
           set -uo pipefail
           # 回归防护：二进制必须能真正启动并对外提供 /api/health。
-          # 已捕获的两类缺陷：
+          # 已捕获的三类缺陷：
           #   1) 缺 class-validator（NestJS 动态 require，pkg 静态分析不到）
           #      → `ERROR [PackageLoader] The "class-validator" package is missing`
           #   2) pkg 对 ESM 变体字节码化失败
-          #      → `Check failed: i::Script::GetPositionInfo(...)` / `V8_Fatal` 崩溃
-          rm -f smoke.log health.json
-          PANEL_PORT=3999 PANEL_DATA_DIR="$PWD/smoke-data" \
+          #      → `Check failed: i::Script::GetPositionInfo(...)` / `V8_Fatal`
+          #   3) Smoke test 自身无界 wait 把 job 挂死（v0.1.6 首次运行被取消）
+          # 失败时输出足够诊断信息：进程是否存活、监听端口、HTTP 原始响应。
+          rm -rf smoke.log health.json smoke-data
+          PANEL_PORT=3999 PANEL_HOST=127.0.0.1 PANEL_DATA_DIR="$PWD/smoke-data" \
             ./dist/scsm-linux-x64 > smoke.log 2>&1 &
           APP_PID=$!
+          echo "启动二进制 pid=$APP_PID (PANEL_PORT=3999)"
 
           ok=0
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3999/api/health -o health.json 2>/dev/null; then
-              ok=1; break
+              ok=1; echo "第 ${i}s 取得 /api/health"
+              break
             fi
             rm -f health.json
             if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -84,10 +88,22 @@ jobs:
             sleep 1
           done
 
+          # ---- 失败诊断（在杀进程之前采集，保留现场）----
+          if [ "$ok" -ne 1 ]; then
+            echo "===== 诊断：进程状态 ====="
+            kill -0 "$APP_PID" 2>/dev/null && echo "进程 $APP_PID 仍存活（未退出，但也未服务）" \
+              || echo "进程 $APP_PID 已不存在"
+            echo "===== 诊断：监听端口 ====="
+            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || echo "(无 ss/netstat)") \
+              | grep -E ':3999\b' || echo "3999 未监听"
+            echo "===== 诊断：HTTP 原始响应 ====="
+            curl -sS -i http://127.0.0.1:3999/api/health 2>&1 | head -20 || echo "(连接失败)"
+          fi
+
           kill "$APP_PID" 2>/dev/null || true
-          # 有界等待：app 装了 enableShutdownHooks()（SIGTERM 触发优雅停机），若某句柄
-          # 未释放则 wait 会永久阻塞、把整个 job 挂死（实测可复现）。故最多等 15s，
-          # 超时直接 SIGKILL，绝不无限等。
+          # 有界等待：app 调了 enableShutdownHooks()（SIGTERM 触发优雅停机），若某句柄
+          # 未释放则 wait 永久阻塞、拖到 job 超时被取消（v0.1.6 首次运行实测 41.7min）。
+          # 故最多等 15s，仍存活即 SIGKILL。
           for _ in $(seq 1 15); do
             kill -0 "$APP_PID" 2>/dev/null || break
             sleep 1
@@ -96,24 +112,28 @@ jobs:
             echo "::warning::二进制未在 15s 内响应 SIGTERM，已强制 SIGKILL"
             kill -9 "$APP_PID" 2>/dev/null || true
           fi
-          wait "$APP_PID" 2>/dev/null || true
+          set +e; wait "$APP_PID" 2>/dev/null; set -e
 
           echo "===== smoke.log ====="
-          cat smoke.log || true
-          echo "===== health.json ====="
-          cat health.json 2>/dev/null || echo "(未取得健康检查响应)"
+          cat smoke.log 2>/dev/null || echo "(无日志)"
 
           if [ "$ok" -ne 1 ]; then
             if grep -q 'class-validator' smoke.log; then
               echo "::error::class-validator 未被打包（检查 main.ts 显式 require 与 pkg.scripts）"
             elif grep -qE 'V8_Fatal|GetPositionInfo|Fatal error' smoke.log; then
               echo "::error::V8 崩溃——pkg 字节码化失败（检查 pkg.scripts 是否含 node_modules/**/*.js 通配）"
+            elif grep -qE 'MODULE_NOT_FOUND|Cannot find module' smoke.log; then
+              echo "::error::运行时缺模块——pkg 未收录该依赖（在 main.ts 补显式 require）"
             else
-              echo "::error::二进制未能在 30s 内响应 /api/health"
+              echo "::error::二进制未能在 30s 内响应 /api/health（详见上方诊断与 smoke.log）"
             fi
             exit 1
           fi
-          grep -q '"status":"ok"' health.json
+          if ! grep -q '"status":"ok"' health.json; then
+            echo "::error::/api/health 响应内容异常"
+            cat health.json
+            exit 1
+          fi
           echo "Smoke test 通过：二进制启动正常且 /api/health 响应正常"
 
       - name: Create Release

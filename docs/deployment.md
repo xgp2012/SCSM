@@ -181,6 +181,13 @@ PANEL_DATA_DIR=./data SERVER_TEMPLATE_DIR=/path/to/服务端本体 ./scsm-linux-
   实测对比：`scripts: ["dist/**/*.js"]`（配合显式 require）= **0** 条字节码警告且运行正常；
   追加 `node_modules/**/*.js` = **452** 条警告 + 启动崩溃。
 - `node-pty` 为原生模块，通过 `pkg.assets` 纳入；目标机首次运行会解压原生 `.node`。
+- **`pino-pretty` 不可用会让面板完全起不来（生产同理）**：`pino-pretty` 只在
+  devDependencies，而 `pnpm deploy --prod` / pkg 二进制都不含它；pino 的 transport
+  目标由**运行时** worker_threads 解析，pkg 也静态收录不到。若强行启用，`pino()` 抛
+  `unable to determine transport target for "pino-pretty"`，该异常在 `app.listen()`
+  之前，面板直接启动失败（现象：进程存活但不监听端口）。`createLogger()` 现已探测
+  `pino-pretty` 可用性，不可用则回退结构化 JSON 日志，保证始终能启动。
+  生产环境建议显式 `LOG_PRETTY=false`。
 - 发布流程含 **Smoke test**：启动打包产物并对 `GET /api/health` 探活，同时断言日志中
   不含 `class-validator` 缺失错误与 V8 致命错误，防止缺陷再次流入 Release。
 
