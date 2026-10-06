@@ -99,6 +99,53 @@ gofmt -l .          # must print nothing
 
 ---
 
+## Releases
+
+Publishing is automated by [`.github/workflows/go-build.yml`](../.github/workflows/go-build.yml).
+Pushing a `v*` tag builds the binary, tests it, and creates a GitHub release:
+
+```bash
+git tag -a v0.2.0 -m "SCNETM v0.2.0"
+git push origin v0.2.0
+```
+
+Each release carries three assets:
+
+| Asset | Contents |
+|---|---|
+| `scnetm-linux-amd64` | the bare static binary |
+| `scnetm-linux-amd64.tar.gz` | binary, `config.example.yaml`, `scnetm.service`, `README.md` |
+| `SHA256SUMS` | checksums for the two above |
+
+Verify a download before running it:
+
+```bash
+curl -sSLO https://github.com/xgp2012/SCSM/releases/download/v0.2.0/SHA256SUMS
+curl -sSLO https://github.com/xgp2012/SCSM/releases/download/v0.2.0/scnetm-linux-amd64
+sha256sum -c SHA256SUMS
+```
+
+### Things that will bite you
+
+* **`permissions: contents: write` is required on the release job.** With the
+  default `contents: read` the build goes green and only the release step fails,
+  with `Resource not accessible by integration`. The workflow sets `read` at the
+  top level and elevates inside the job.
+* **The tag must match the version compiled into the binary.** `VERSION` comes
+  from `GITHUB_REF_NAME`, so on a tag push it is the tag name; a step asserts
+  `--version` reports exactly that string, and fails the release otherwise.
+* **A bare `go build` must never be used for a release.** It succeeds with exit
+  code 0 while embedding a placeholder page. The workflow's "Verify frontend is
+  embedded" step starts the binary and asserts `/` serves the real UI, because
+  grepping the binary for a marker cannot distinguish the two — the placeholder
+  text is compiled into every build.
+* **Version lines.** The `v0.1.x` tags belong to an earlier Node.js
+  implementation of this panel; that history was replaced on `main` and is kept
+  on the `legacy-nodejs-archive` branch. The Go implementation starts at
+  `v0.2.0`. Do not reuse a `v0.1.x` tag.
+
+---
+
 ## The `go:embed` workaround (read this before touching the frontend build)
 
 **`go:embed` cannot reference a path outside the directory containing the
