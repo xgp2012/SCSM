@@ -77,12 +77,25 @@ jobs:
             fi
             rm -f health.json
             if ! kill -0 "$APP_PID" 2>/dev/null; then
-              wait "$APP_PID"; echo "::error::二进制在启动过程中退出（exit=$?）"; break
+              set +e; wait "$APP_PID"; rc=$?; set -e
+              echo "::error::二进制在启动过程中退出（exit=$rc）"
+              break
             fi
             sleep 1
           done
 
           kill "$APP_PID" 2>/dev/null || true
+          # 有界等待：app 装了 enableShutdownHooks()（SIGTERM 触发优雅停机），若某句柄
+          # 未释放则 wait 会永久阻塞、把整个 job 挂死（实测可复现）。故最多等 15s，
+          # 超时直接 SIGKILL，绝不无限等。
+          for _ in $(seq 1 15); do
+            kill -0 "$APP_PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo "::warning::二进制未在 15s 内响应 SIGTERM，已强制 SIGKILL"
+            kill -9 "$APP_PID" 2>/dev/null || true
+          fi
           wait "$APP_PID" 2>/dev/null || true
 
           echo "===== smoke.log ====="
