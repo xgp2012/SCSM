@@ -1,0 +1,72 @@
+# --- build artefacts ---------------------------------------------------------
+/scnetm
+/build/
+/dist/
+*.exe
+*.test
+*.out
+
+# The embedded frontend is a build artefact produced by `make build`, which
+# copies web/dist -> internal/webui/dist. Only the placeholder is tracked; the
+# go:embed directive requires the directory to exist at compile time.
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
+# --- frontend -----------------------------------------------------------------
+/web/node_modules/
+/web/dist/
+/web/.vite/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# --- panel runtime data -------------------------------------------------------
+# Default data_dir is ./data; it holds the SQLite DB and instance directories.
+/data/
+*.db
+*.db-wal
+*.db-shm
+/instances/
+/logs/
+
+# --- local config -------------------------------------------------------------
+# Only the example is tracked; real configs carry host-specific paths.
+/config.yaml
+/config.local.yaml
+
+# --- secrets ------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- editors / OS -------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- tooling caches -----------------------------------------------------------
+# Several agents set GOCACHE/GOMODCACHE inside the repo (see .goenv.sh) so that
+# a shared build cache survives concurrent work. None of it is source.
+/.gocache/
+/.gomodcache/
+/.goenv
+/.goenv.sh
+/coverage.out
+/coverage.html
+
+# The frontend agent runs npm with a repo-local XDG dir.
+/web/.xdg/
+
+# --- upstream reference checkout ---------------------------------------------
+# scnet-src/ is a nested clone of the upstream SurvivalcraftNet repository
+# (gitee.com/SC-SPM/SurvivalcraftNet) kept locally as read-only evidence for the
+# panel's config/log assumptions. It is a different project under its own
+# licence and carries ~89 MB of client packages, so it is never published here.
+# Re-clone it alongside this repo if the reference is needed.
+/scnet-src/

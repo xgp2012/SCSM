@@ -1,0 +1,220 @@
+name: Go Build
+
+# Builds the SCNETM panel as a self-contained Linux x86-64 binary.
+#
+# Two things about this project make the ordering below load-bearing:
+#
+#   1. The frontend must be built and copied into internal/webui/dist BEFORE
+#      `go build` runs. go:embed cannot reference ../../web/dist, so the binary
+#      embeds whatever happens to sit in internal/webui/dist at compile time.
+#      A bare `go build` on a clean checkout therefore succeeds with exit code 0
+#      while embedding a placeholder page — a silent failure that looks green.
+#      The "Verify frontend is embedded" step below turns that into a hard error.
+#   2. CGO is disabled. The SQLite driver is modernc.org/sqlite, a pure-Go
+#      translation, so the result is a static binary with no libc/libsqlite3
+#      dependency.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Keep this in step with the `go` directive in go.mod.
+  GO_VERSION: '1.27.1'
+  NODE_VERSION: '22'
+  # Left unset on purpose: pnpm/action-setup reads `packageManager` from
+  # web/package.json, so the version is declared in exactly one place.
+
+jobs:
+  build:
+    name: Build linux/amd64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # internal/version reads vcs.revision via debug.ReadBuildInfo, so the
+          # binary wants a real git history to report an accurate commit.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up pnpm
+        # The version comes from web/package.json's `packageManager` field.
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # ---- Go: static analysis and tests (fast, fail early) -------------------
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt reported unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      # ---- Frontend ----------------------------------------------------------
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: web
+        # package.json's build script runs `pnpm type-check && vite build`, so a
+        # type error fails here rather than surfacing as a broken page later.
+        run: pnpm run build
+
+      # ---- Assemble the binary ----------------------------------------------
+      # `make build` performs the web/dist -> internal/webui/dist copy and then
+      # compiles with CGO_ENABLED=0 and the version ldflags.
+      - name: Build binary
+        run: |
+          make build \
+            VERSION="${GITHUB_REF_NAME}" \
+            COMMIT="${GITHUB_SHA}" \
+            BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Verify frontend is embedded
+        # Guards the silent-placeholder failure described in the header comment.
+        #
+        # This must be a *behavioural* check. Grepping the binary for a marker
+        # does not work: the placeholder page and its ErrNotBuilt message are
+        # compiled into every build, so the string "frontend not built" is
+        # present whether or not a real UI was embedded. Instead, start the
+        # panel and assert that "/" serves the real index.html.
+        run: |
+          set -uo pipefail
+          rm -rf verify-data
+          ./build/scnetm --listen 127.0.0.1:3998 --data-dir "$PWD/verify-data" > verify.log 2>&1 &
+          pid=$!
+          served=""
+          for _ in $(seq 1 30); do
+            if served="$(curl -fsS http://127.0.0.1:3998/ 2>/dev/null)"; then break; fi
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+
+          echo "----- verify.log -----"; cat verify.log || true
+
+          if printf '%s' "$served" | grep -q 'frontend not built'; then
+            echo "::error::binary serves the placeholder page — the frontend was not copied into internal/webui/dist before go build"
+            exit 1
+          fi
+          if ! printf '%s' "$served" | grep -q 'SCNETM'; then
+            echo "::error::GET / did not return the panel frontend (got: ${served:0:200})"
+            exit 1
+          fi
+          echo "Frontend is embedded and served correctly."
+
+      - name: Report binary details
+        run: |
+          file build/scnetm
+          ls -lh build/scnetm
+          ./build/scnetm --version
+
+      # ---- Smoke test --------------------------------------------------------
+      # /healthz is deliberately unauthenticated and dependency-light: it must
+      # answer on a host with no .NET runtime and no game-server package, which
+      # is exactly this runner. That makes "does it bind and serve" checkable.
+      - name: Smoke test binary
+        run: |
+          set -uo pipefail
+          rm -rf smoke-data smoke.log
+          ./build/scnetm --listen 127.0.0.1:3999 --data-dir "$PWD/smoke-data" > smoke.log 2>&1 &
+          pid=$!
+          echo "started pid=$pid on 127.0.0.1:3999"
+
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3999/healthz -o health.json; then
+              ok=1; echo "answered /healthz after ${i}s"; break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::binary exited during startup"; break
+            fi
+            sleep 1
+          done
+
+          # Collect diagnostics before killing, so a failure keeps its evidence.
+          if [ "$ok" -ne 1 ]; then
+            echo "===== process ====="
+            kill -0 "$pid" 2>/dev/null && echo "still alive but not serving" || echo "gone"
+            echo "===== listening sockets ====="
+            (ss -ltnp 2>/dev/null || true) | grep ':3999' || echo "3999 not listening"
+            echo "===== raw response ====="
+            curl -sS -i http://127.0.0.1:3999/healthz 2>&1 | head -20 || true
+          fi
+
+          kill "$pid" 2>/dev/null || true
+          for _ in $(seq 1 15); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          kill -9 "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+
+          echo "===== smoke.log ====="
+          cat smoke.log || true
+
+          [ "$ok" -eq 1 ] || { echo "::error::/healthz did not answer within 30s"; exit 1; }
+          grep -q '"status":"ok"' health.json || { echo "::error::unexpected /healthz body"; cat health.json; exit 1; }
+          echo "Smoke test passed."
+
+      # ---- Package -----------------------------------------------------------
+      - name: Package release tarball
+        run: |
+          mkdir -p dist
+          cp build/scnetm dist/scnetm-linux-amd64
+          cp configs/config.example.yaml dist/ 2>/dev/null || true
+          cp deployments/scnetm.service dist/ 2>/dev/null || true
+          tar -C dist -czf "scnetm-linux-amd64.tar.gz" \
+            scnetm-linux-amd64 config.example.yaml scnetm.service
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scnetm-linux-amd64
+          path: |
+            dist/scnetm-linux-amd64
+            scnetm-linux-amd64.tar.gz
+          if-no-files-found: error
+
+      # ---- Release (tags only) ----------------------------------------------
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/scnetm-linux-amd64
+            scnetm-linux-amd64.tar.gz
+          generate_release_notes: true

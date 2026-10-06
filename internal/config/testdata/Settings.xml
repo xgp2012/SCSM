@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Settings>
+  <ServerPort Value="28887" />
+  <BroadcastPort Value="28888" />
+  <VisibilityRange Value="128" />
+  <Resolution Value="High" />
+  <Language Value="zh-CN" />
+  <MaxFPS Value="60" />
+  <EnableSound Value="true" />
+  <WillEnterServer Value="false" />
+</Settings>

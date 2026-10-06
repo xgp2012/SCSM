@@ -1,0 +1,162 @@
+# scnetm — docker compose deployment
+#
+# Usage:
+#   docker compose -f deployments/docker-compose.yml build
+#   docker compose -f deployments/docker-compose.yml up -d
+#   docker compose -f deployments/docker-compose.yml logs -f scnetm
+#
+# Validate without starting anything:
+#   docker compose -f deployments/docker-compose.yml config
+#
+# ---------------------------------------------------------------------------
+# THE PTY QUESTION (plan D1 / tasks V0-1 & V0-3) — READ THIS
+# ---------------------------------------------------------------------------
+# The panel starts each game instance on a PTY so the server emits ANSI colour.
+# A PTY needs `open("/dev/ptmx", O_RDWR)` to succeed inside the container.
+#
+# Docker's defaults do NOT guarantee this, and the failure is silent: the panel
+# degrades to pipes and instances log without colour (violating D1).
+#
+# The options below are therefore deliberately explicit rather than relying on
+# a default. They are ANNOTATED with why each exists, and one of them is marked
+# as the load-bearing one. Verify on the target host with:
+#
+#   docker compose -f deployments/docker-compose.yml exec scnetm \
+#     python3 -c 'import pty; pty.openpty(); print("PTY OK")'
+#
+# or, without Python in the image:
+#
+#   docker compose -f deployments/docker-compose.yml exec scnetm \
+#     sh -c 'test -w /dev/ptmx && echo writable'
+#
+# NOTE: this could NOT be validated inside a container in the environment where
+# this file was written (no Docker daemon access). Treat it as the documented
+# starting point, not as a verified configuration. See
+# docs/环境与可运行性验证.md §4.
+
+services:
+  scnetm:
+    build:
+      # Build context is the repository root, not deployments/, because the
+      # Dockerfile needs go.mod, web/ and internal/ all at once.
+      context: ..
+      dockerfile: deployments/Dockerfile
+    image: scnetm:dev
+    container_name: scnetm
+
+    # -----------------------------------------------------------------------
+    # PTY ENABLING — the load-bearing options for D1
+    # -----------------------------------------------------------------------
+    # tty: true allocates a console for the container, which makes Docker set up
+    # the container's /dev/ptmx and keep a PTY path available. The panel then
+    # inherits a usable PTY subsystem instead of a bare pipe-only environment.
+    tty: true
+
+    # stdin_open is the companion to tty: without an open stdin the allocated
+    # console is torn down and the panel cannot write commands to instance
+    # stdin (the primary command channel per plan §5.3).
+    stdin_open: true
+
+    # `devices` maps a host device node into the container. /dev/ptmx is the
+    # PTY multiplexer every PTY allocation goes through. Mapping it explicitly
+    # is belt-and-braces: it guarantees the node exists and is usable even if
+    # `tty: true` is dropped by an operator or overridden by an orchestrator.
+    devices:
+      - "/dev/ptmx:/dev/ptmx"
+
+    # -----------------------------------------------------------------------
+    # Networking
+    # -----------------------------------------------------------------------
+    ports:
+      # Panel HTTP UI. Bind to loopback on the host by default: put a
+      # TLS-terminating reverse proxy in front before exposing it (plan §5.7).
+      - "127.0.0.1:8080:8080"
+
+      # Game-server UDP ports. The panel's port_pool in
+      # deployments/config.docker.yaml is 28887..28896 (10 ports == 10
+      # concurrent instances, the project's default sizing assumption).
+      #
+      # These MUST be UDP: the SurvivalcraftNet server binds UDP. A TCP-only
+      # mapping would publish nothing useful.
+      #
+      # NOTE: instance ports are assigned dynamically from the pool, so a
+      # fixed-range mapping like this is correct only while the pool stays
+      # within it. Widen the pool deliberately, or switch to
+      # `network_mode: host` (which also simplifies PTY/device access).
+      - "28887-28896:28887-28896/udp"
+
+    # -----------------------------------------------------------------------
+    # Storage
+    # -----------------------------------------------------------------------
+    volumes:
+      # Panel data: SQLite database, per-instance directories and logs, backups.
+      - scnetm-data:/var/lib/scnetm
+
+      # Unpacked game-server package used as the instance template. READ-ONLY
+      # is intentional: the panel copies from it and must never mutate it, so
+      # a bug cannot corrupt the pristine template (plan §9.3).
+      # Create this directory on the host and unpack the server package into it.
+      - ../scnetm-templates:/var/lib/scnetm/templates:ro
+
+      # Configuration file. Also read-only: the panel reads it once at
+      # start-up and never writes it.
+      - ./config.docker.yaml:/etc/scnetm/config.yaml:ro
+
+    # -----------------------------------------------------------------------
+    # Process / signal behaviour
+    # -----------------------------------------------------------------------
+    # The panel spawns game servers in their OWN process groups so it can
+    # signal an entire group on stop (plan §5.4). That only works if the panel
+    # is free to create sessions/process groups, which the default seccomp and
+    # capability profile already allow — but `init` is needed so orphaned
+    # processes are reaped rather than accumulating as zombies. tini is baked
+    # into the image as PID 1, and `init: true` here is belt-and-braces for the
+    # case where the image's ENTRYPOINT is ever replaced.
+    init: true
+
+    # Give instances time to save their worlds before the panel is killed.
+    # The panel's own stop_timeout_sec is 30s; this is the outer bound and must
+    # exceed it, or Docker SIGKILLs the panel mid-shutdown and the world files
+    # may not be flushed (plan §5.4, §6.5).
+    stop_grace_period: 60s
+
+    # -----------------------------------------------------------------------
+    # Resilience
+    # -----------------------------------------------------------------------
+    # on-failure (not always): restart after a crash, but stay down if the
+    # panel exits cleanly — an operator who stopped it meant to.
+    restart: on-failure
+
+    # The panel opens a PTY and a pipe pair per instance plus SQLite handles.
+    # 10 instances is modest, but backups and log tailing multiply descriptors;
+    # the default 1024 is uncomfortably close, so raise it explicitly.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # -----------------------------------------------------------------------
+    # Health
+    # -----------------------------------------------------------------------
+    # /healthz answers as soon as the panel is up — and it does so WITHOUT
+    # .NET and WITHOUT any game server present, which is exactly why it is a
+    # valid liveness probe rather than a readiness proxy for instances.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/scnetm", "--version"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    logging:
+      # Instance logs are written to files under the volume by the panel; this
+      # only bounds the panel's own stdout, which would otherwise grow without
+      # limit under a long-running daemon.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  scnetm-data:
+    driver: local

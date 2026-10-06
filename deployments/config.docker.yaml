@@ -1,0 +1,56 @@
+# scnetm panel configuration — container variant.
+#
+# Used by deployments/Dockerfile (copied to /etc/scnetm/config.yaml) and
+# deployments/docker-compose.yml. It differs from configs/config.example.yaml
+# only where the container changes the right answer:
+#
+#   * listen      0.0.0.0 — the container's network namespace is the boundary,
+#                 so binding loopback inside it would make the panel unreachable
+#                 from the host. Publish the port explicitly in compose.
+#   * data_dir    /var/lib/scnetm — the mounted volume.
+#   * dotnet_path resolved from PATH: the base image is
+#                 mcr.microsoft.com/dotnet/runtime:10.0, so the runtime is at a
+#                 known location and no host install is needed.
+#
+# NOTE: the panel does not need .NET to boot. It serves /healthz immediately;
+# .NET is only required when an instance is started.
+
+listen: "0.0.0.0:8080"
+
+data_dir: "/var/lib/scnetm"
+
+instances_dir: "/var/lib/scnetm/instances"
+
+# Unpacked game-server package used as the template for new instances. Mount it
+# at this path, or point this at wherever you mounted it.
+template_dir: "/var/lib/scnetm/templates/server"
+
+# Inside the runtime image the .NET 10 runtime lives at /usr/share/dotnet.
+# PATH already contains DOTNET_ROOT (see the Dockerfile ENV), so the bare name
+# resolves; the absolute path is used here to remove all doubt.
+dotnet_path: "/usr/share/dotnet/dotnet"
+
+# The game server binds UDP, so these are UDP ports. 10 ports == 10 concurrent
+# instances, matching the project's default sizing assumption.
+port_pool: [28887, 28896]
+
+# 【D1】 TERM injected into each instance's PTY. The server only emits ANSI
+# colour when it believes it is on a capable terminal.
+term: "xterm-256color"
+
+# enhanced = run under a PTY and keep ANSI colour.
+# This REQUIRES /dev/ptmx to be usable inside the container: see the
+# `tty:` / `devices:` options in docker-compose.yml. If PTY allocation fails,
+# the panel degrades to basic (uncoloured) mode and records that per instance.
+color_mode: "enhanced"
+
+defaults:
+  # Graceful-stop grace period before escalating to SIGKILL. The panel sends
+  # SIGTERM to the instance's process group and waits this long.
+  stop_timeout_sec: 30
+
+  auto_backup:
+    enabled: true
+    # 5-field cron: minute hour day-of-month month day-of-week.
+    cron: "0 4 * * *"
+    keep: 7

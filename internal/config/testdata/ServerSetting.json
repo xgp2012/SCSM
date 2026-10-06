@@ -1,0 +1,21 @@
+{
+  "AutoGenerateWorld": false,
+  "Autorun": false,
+  "CheckLogin": false,
+  "GameMode": 1,
+  "PVPEnabled": true,
+  "RandomSpawnPosition": false,
+  "ScKeyServerId": "",
+  "ScKeyServerName": "",
+  "SeasonChanging": true,
+  "SomeFutureOption": 42,
+  "WorldDaySpeed": 1,
+  "WorldDisableBlocks": "",
+  "WorldKeywordBlocking": "",
+  "WorldMaxPlayers": 20,
+  "WorldName": "ShowNameX",
+  "WorldPassword": "",
+  "WorldPath": "app:/Worlds/MyWorldA",
+  "WorldRecoverySpeed": 1,
+  "WorldSeed": "999"
+}

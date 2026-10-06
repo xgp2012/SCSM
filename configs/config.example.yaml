@@ -1,0 +1,58 @@
+# scnetm panel configuration (plan §9.1)
+#
+# This file configures the PANEL itself. The game server's own configuration
+# (ServerSetting.json, Settings.xml) is per-instance and lives in each instance
+# directory; it is edited through the UI, not here.
+#
+# Copy to config.yaml (next to the binary) or pass --config /etc/scnetm/config.yaml.
+# Every key is optional: anything omitted falls back to the default shown in the
+# comment. Unknown keys are rejected at start-up, so typos fail loudly.
+
+# HTTP listen address. The default binds loopback only — put a TLS-terminating
+# reverse proxy in front of it before exposing the panel (plan §5.7).
+listen: "127.0.0.1:8080"
+
+# Root directory for panel-owned data: the SQLite database, instance
+# directories and logs. Relative paths resolve against this file's directory.
+data_dir: "/srv/scnetm"
+
+# Where per-instance working directories live. Defaults to <data_dir>/instances.
+# Each instance gets its own subdirectory, which is also its process CWD — this
+# is what isolates instances from one another (plan §4.3).
+instances_dir: "/srv/scnetm/instances"
+
+# Unpacked game-server package used as the template when creating an instance.
+# Upgrading the server = point this at a new directory; existing instances keep
+# running the version they were created with (plan §9.3).
+template_dir: "/srv/scnetm/templates/server-x26.07.01.01"
+
+# Path to the dotnet executable. May be a bare command name resolved via PATH,
+# or an absolute path.
+#   NOTE: the .NET 10 runtime is NOT installed in the current dev environment.
+#   The panel still starts and serves /healthz without it; only starting an
+#   instance requires it (see docs/README.md).
+dotnet_path: "/root/.dotnet/dotnet"
+
+# Ports the panel may hand out to instances. The server binds UDP, so these are
+# UDP ports (plan §4.3). Duplicates are rejected; the default pool is the
+# inclusive range 28887..28900.
+port_pool: [28887, 28900]
+
+# TERM value injected into each instance's PTY. This is the 【D1】 decision: the
+# server only emits ANSI colour when it believes it is on a capable terminal.
+term: "xterm-256color"
+
+# enhanced = run under a PTY and keep ANSI colour
+# basic    = degraded, uncoloured output (recorded per instance when PTY fails)
+color_mode: "enhanced"
+
+defaults:
+  # How long a graceful stop waits before escalating to SIGKILL.
+  stop_timeout_sec: 30
+
+  auto_backup:
+    enabled: true
+    # 5-field cron: minute hour day-of-month month day-of-week.
+    cron: "0 4 * * *"
+    # How many scheduled backups to retain per instance.
+    keep: 7

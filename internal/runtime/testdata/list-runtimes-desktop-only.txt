@@ -1,0 +1,1 @@
+Microsoft.WindowsDesktop.App 10.0.12 [/usr/share/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.12]

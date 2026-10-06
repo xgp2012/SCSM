@@ -1,0 +1,160 @@
+# scnetm — systemd unit (plan §9.1, bare-metal deployment)
+#
+# Install:
+#   sudo useradd --system --home /srv/scnetm --shell /usr/sbin/nologin scnetm
+#   sudo mkdir -p /srv/scnetm /etc/scnetm
+#   sudo cp deployments/scnetm.service /etc/systemd/system/
+#   sudo cp deployments/config.systemd.yaml /etc/scnetm/config.yaml   # then edit
+#   sudo cp build/scnetm /usr/local/bin/ && sudo chmod 755 /usr/local/bin/scnetm
+#   sudo systemctl daemon-reload && sudo systemctl enable --now scnetm
+#
+# Inspect:
+#   systemctl status scnetm
+#   journalctl -u scnetm -f
+#   systemd-analyze verify deployments/scnetm.service
+#
+# ===========================================================================
+# WHY THIS UNIT LOOKS DIFFERENT FROM A TYPICAL SERVICE
+# ===========================================================================
+# scnetm is a process supervisor. It does not just serve HTTP; it starts game
+# servers, and it needs three capabilities an ordinary hardened service is
+# normally denied:
+#
+#   1. PTY allocation  — open("/dev/ptmx", O_RDWR) to give each instance a
+#      pseudo-terminal so the server emits ANSI colour (plan decision D1).
+#      This is why PrivateDevices=no: PrivateDevices=yes replaces /dev with a
+#      minimal set that contains NO /dev/ptmx, which would silently force every
+#      instance into uncoloured pipe mode.
+#
+#   2. Process groups  — the panel puts each instance in its own process group
+#      so that stopping an instance signals the whole group (server plus any
+#      child it spawned) rather than leaking orphans. That requires the panel
+#      to be allowed to call setpgid/setsid on its children, which the default
+#      sandbox permits but NoNewPrivileges=yes must not be allowed to break.
+#
+#   3. Group termination — KillMode=control-group makes systemd stop the panel
+#      AND every process still in its cgroup. Without it, stopping the panel
+#      would leave game servers running and holding their UDP ports.
+#
+# The tension: KillMode=control-group is also what makes an unclean stop
+# dangerous, because it can SIGKILL instances before they flush their worlds to
+# disk. The panel therefore handles SIGTERM by gracefully stopping each instance
+# within its own stop_timeout_sec (default 30s), and this unit sets
+# TimeoutStopSec comfortably above that.
+# ===========================================================================
+
+[Unit]
+Description=scnetm — SurvivalcraftNet server management panel
+# NOTE: systemd rejects non-ASCII characters in Documentation= URLs, so the
+# Chinese-named report cannot be referenced directly here. These two ASCII
+# paths cover the same material.
+Documentation=file:///srv/scnetm/docs/README.md
+Documentation=file:///srv/scnetm/docs/environment-verification.md
+# The panel needs working DNS and a configured loopback interface, but it
+# explicitly does NOT need .NET at start-up: /healthz must answer even when no
+# runtime is installed. Do not add a dotnet dependency here.
+After=network-online.target
+Wants=network-online.target
+
+# Crash-loop guard: at most 5 restarts in 60s, then give up and stay failed so
+# the problem is visible instead of being silently retried forever.
+# NOTE: these two keys live in [Unit], not [Service] — systemd ignores them
+# (with a warning) if placed in [Service].
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# ---------------------------------------------------------------------------
+# Identity and working directory
+# ---------------------------------------------------------------------------
+# A dedicated unprivileged user. The panel manages its own children and needs
+# no root: running as root would let a panel compromise escalate to the host.
+User=scnetm
+Group=scnetm
+
+# Instance directories are also each instance's process CWD (plan §4.3). The
+# panel resolves relative config paths against this, so it must be set.
+WorkingDirectory=/srv/scnetm
+
+# ---------------------------------------------------------------------------
+# Command
+# ---------------------------------------------------------------------------
+ExecStart=/usr/local/bin/scnetm --config /etc/scnetm/config.yaml
+# Reload picks up config.yaml changes without dropping instances.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# ---------------------------------------------------------------------------
+# Restart policy
+# ---------------------------------------------------------------------------
+# on-failure: restart after a crash or a non-zero exit, but honour a clean
+# `systemctl stop` (exit 0) instead of fighting the operator.
+Restart=on-failure
+RestartSec=5s
+
+# ---------------------------------------------------------------------------
+# Stopping
+# ---------------------------------------------------------------------------
+# SIGTERM triggers the panel's graceful path: it asks each instance to stop,
+# waits stop_timeout_sec, then escalates. 30s default + margin for backups and
+# world flush => 90s here. If this is shorter than the panel needs, systemd
+# will SIGKILL the panel and take the instances (and their unsaved worlds) with it.
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+
+# KillMode=control-group is REQUIRED: it terminates every process left in the
+# unit's cgroup, so game servers cannot survive a panel stop and keep holding
+# their UDP ports. KillMode=process would leak them.
+KillMode=control-group
+
+# ---------------------------------------------------------------------------
+# Devices and privileges — the D1-critical settings
+# ---------------------------------------------------------------------------
+# MUST be no. PrivateDevices=yes gives the service a minimal /dev that has no
+# /dev/ptmx, so pty.Open() would fail with EACCES and D1 (coloured output)
+# would silently degrade to uncoloured pipes. This single line is the
+# difference between colour and no colour.
+PrivateDevices=no
+
+# The panel must be able to signal processes it owns, including in the process
+# groups it created. Keep device access open; everything else stays sandboxed.
+ProtectSystem=full
+ProtectHome=yes
+# ProtectKernelTunables/Modules/ControlGroups are safe for the panel.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+# NoNewPrivileges=yes would block setuid-based escalation, which the panel does
+# not need; but it also prevents the panel from ever gaining privileges via a
+# helper. Keep it ON — it does not interfere with PTY allocation or setpgid.
+NoNewPrivileges=yes
+
+# RestrictNamespaces=no: the panel does not create namespaces, so this can stay
+# restrictive. Set to no only if a future sandboxing feature needs it.
+RestrictNamespaces=yes
+
+# ---------------------------------------------------------------------------
+# Resource limits
+# ---------------------------------------------------------------------------
+# Each instance costs: one PTY master/slave pair, a pipe pair, log files, and
+# SQLite handles; scheduled backups add more transient descriptors. The systemd
+# default (1024) is too close for 10 concurrent instances plus backups.
+LimitNOFILE=65536
+
+# Instances are separate processes; make sure the panel is not the first thing
+# the OOM killer reaches when a java-style heap runaway occurs. This is a
+# relative weight, not a reservation.
+OOMScoreAdjust=-200
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

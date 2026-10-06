@@ -1,0 +1,16 @@
+# esbuild ships a platform-specific native binary installed by a postinstall
+# script. pnpm blocks build scripts by default, so it must be explicitly
+# allowed or `vite build` fails with a missing binary.
+#
+# Both keys are present deliberately:
+#   allowBuilds           — the field pnpm 12 consults; must be a real boolean.
+#   onlyBuiltDependencies — the older field, kept for pnpm 9/10 compatibility.
+#
+# Do not let either value degrade to the placeholder text
+# "set this to true or false": pnpm 12.6.0 writes that literal string when an
+# install fails (upstream bug #11535), and once present it makes every later
+# install abort with ERR_PNPM_IGNORED_BUILDS until the entry is removed.
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

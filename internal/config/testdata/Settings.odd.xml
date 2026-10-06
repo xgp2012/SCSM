@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-edited by an operator. Do not reformat; the engine is picky. -->
+<Settings>
+	<VisibilityRange Value="128" />
+        <ServerPort    Value='28887'   />
+	<Resolution Value="High"></Resolution>
+  <Language Value="zh-CN" />
+<!-- port comment -->
+		<MaxFPS Value="60"/>
+  <EnableSound Value="true" />
+<WillEnterServer Value="false" />
+</Settings>

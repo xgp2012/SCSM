@@ -1,0 +1,97 @@
+# scnetm panel configuration — bare-metal / systemd variant (plan §9.1).
+#
+# Installed as /etc/scnetm/config.yaml by deployments/scnetm.service's setup
+# instructions. Paths assume the layout that unit documents:
+#
+#   /usr/local/bin/scnetm          the binary
+#   /srv/scnetm                    WorkingDirectory, data root, and instance root
+#   /etc/scnetm/config.yaml        this file (read-only for the panel)
+#   user/group "scnetm"            owns /srv/scnetm and runs the panel
+#
+# Every key is optional; omitted keys fall back to the defaults noted above.
+# Unknown keys are REJECTED at start-up (KnownFields(true)), so a typo fails
+# loudly instead of being silently ignored.
+
+# ---------------------------------------------------------------------------
+# Panel HTTP
+# ---------------------------------------------------------------------------
+# Loopback only. The panel has no TLS of its own: put a TLS-terminating reverse
+# proxy in front before exposing it (plan §5.7). Binding 0.0.0.0 here would
+# publish an unauthenticated management UI.
+listen: "127.0.0.1:8080"
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+# Owned by the scnetm user. Holds scnetm.db plus instance state.
+data_dir: "/srv/scnetm"
+
+# Each instance gets its own subdirectory here, and that directory is also the
+# instance process's CWD — this is what keeps instances isolated from each other
+# and makes WorldPath semantics predictable (plan §4.3, §2.7).
+instances_dir: "/srv/scnetm/instances"
+
+# Pristine unpacked game-server package, used as the template for new instances.
+# Upgrading the server means pointing this at a new directory; existing
+# instances keep running the version they were created with (plan §9.3).
+template_dir: "/srv/scnetm/templates/server"
+
+# ---------------------------------------------------------------------------
+# .NET
+# ---------------------------------------------------------------------------
+# The panel itself does not need .NET: it serves /healthz immediately even when
+# no runtime is installed. A runtime is required only to START an instance.
+#
+# Set this to the absolute path if the runtime is not on PATH for the scnetm
+# user — which is the usual case for a systemd service, because a service does
+# not source your shell profile. Install with scripts/install-dotnet.sh.
+#
+# Verify with: /srv/scnetm/.dotnet/dotnet --list-runtimes
+dotnet_path: "/srv/scnetm/.dotnet/dotnet"
+
+# ---------------------------------------------------------------------------
+# Instance ports
+# ---------------------------------------------------------------------------
+# The SurvivalcraftNet server binds UDP, so these are UDP ports, not TCP.
+# 28887..28896 is 10 ports == the project's default 10-concurrent-instance
+# sizing assumption. Keep the range contiguous so a single firewall rule covers
+# the whole pool.
+port_pool: [28887, 28896]
+
+# ---------------------------------------------------------------------------
+# Terminal / colour (plan decision D1)
+# ---------------------------------------------------------------------------
+# TERM injected into each instance's PTY. The server chooses its colour palette
+# based on what it believes the terminal supports.
+term: "xterm-256color"
+
+# enhanced = allocate a PTY per instance and preserve ANSI colour.
+# basic    = degraded, uncoloured output.
+#
+# "enhanced" requires open("/dev/ptmx", O_RDWR) to succeed for the scnetm user.
+# This is why deployments/scnetm.service sets PrivateDevices=no — the systemd
+# default replaces /dev with a minimal set containing no /dev/ptmx, which would
+# force a silent downgrade to uncoloured output.
+#
+# If PTY allocation fails at runtime the panel records the degraded mode per
+# instance and keeps working; it does not refuse to start.
+color_mode: "enhanced"
+
+# ---------------------------------------------------------------------------
+# Defaults applied to newly created instances
+# ---------------------------------------------------------------------------
+defaults:
+  # Grace period for a graceful stop before escalating to SIGKILL. The panel
+  # signals the instance's whole process group. Keep this lower than the unit's
+  # TimeoutStopSec (90s) or systemd will SIGKILL the panel first and the
+  # instance may not finish flushing its world to disk.
+  stop_timeout_sec: 30
+
+  auto_backup:
+    enabled: true
+    # 5-field cron: minute hour day-of-month month day-of-week. 04:00 daily.
+    # Backups are written under data_dir and require free disk — watch the
+    # volume, since worlds grow without bound.
+    cron: "0 4 * * *"
+    # Retained per instance. 0 would disable retention, not backups.
+    keep: 7

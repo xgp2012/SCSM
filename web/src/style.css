@@ -1,0 +1,37 @@
+/*
+ * scnetm frontend global styles.
+ *
+ * Per plan §4.4 the library is style-self-contained: exactly two CSS imports are
+ * required and NO `@source` / safelist configuration is needed by the consumer.
+ * Verified against fuxsto-design@1.0.5: the `./styles` subpath resolves to
+ * node_modules/fuxsto-design/dist/styles.css (112 KB, pre-compiled).
+ *
+ * NOTE: Tailwind v4 requires `@import` statements to be emitted verbatim, so
+ * this file is loaded as a plain CSS entry from src/main.ts (not <style>).
+ */
+@import 'tailwindcss';
+@import 'fuxsto-design/styles';
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* xterm.js needs its helper textarea to stay out of the flex flow. */
+  .xterm .xterm-helpers {
+    z-index: 5;
+  }
+}
+
+/* Utility used by the console page: preserve ANSI-independent whitespace. */
+.log-pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
