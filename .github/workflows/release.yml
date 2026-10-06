@@ -55,6 +55,27 @@ jobs:
             --output dist/scsm-linux-x64 \
             --compress GZip
 
+      - name: Smoke test binary
+        run: |
+          # 回归防护：旧版二进制缺少 class-validator（NestJS 动态 require，pkg 静态分析不到），
+          # 启动即 `ERROR [PackageLoader] The "class-validator" package is missing`。
+          # 此处启动二进制并对 /api/health 探活；失败则不发布。
+          PANEL_PORT=3999 PANEL_DATA_DIR="$PWD/smoke-data" \
+            ./dist/scsm-linux-x64 > smoke.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3999/api/health > health.json 2>/dev/null; then break; fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          echo "--- smoke.log ---"; cat smoke.log
+          echo "--- health.json ---"; cat health.json 2>/dev/null || true
+          kill "$APP_PID" 2>/dev/null || true
+          if grep -q 'class-validator' smoke.log; then
+            echo "::error::class-validator 未被打包"; exit 1
+          fi
+          grep -q '"status":"ok"' health.json
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

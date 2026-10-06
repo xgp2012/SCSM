@@ -12,6 +12,15 @@ import { createLogger } from './common/logger/logger';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { parseEnv } from './config/env';
 
+// 单文件二进制（@yao-pkg/pkg）打包必需：NestJS 的 ValidationPipe 用 loadPackage() 动态
+// require('class-validator'/'class-transformer')，pkg 静态分析不到，运行时报
+// `The "class-validator" package is missing`。此处显式静态引用，令 pkg 收录整棵依赖树。
+// 正常 node 运行时该引用无副作用（仅加载模块）。
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('class-validator');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('class-transformer');
+
 async function bootstrap(): Promise<void> {
   const env = parseEnv(process.env);
   const logger = new Logger('Bootstrap');

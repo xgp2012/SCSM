@@ -170,9 +170,15 @@ PANEL_DATA_DIR=./data SERVER_TEMPLATE_DIR=/path/to/服务端本体 ./scsm-linux-
 - `main.ts` 中**显式传 `new ExpressAdapter()`**，否则 NestJS 动态 `require`
   `@nestjs/platform-express`，pkg 静态分析不到，运行时报
   `No driver (HTTP) has been selected`。
-- `package.json` 的 `pkg.scripts` 包含 `node_modules/**/*.js`，确保 class-validator 等
-  动态加载依赖被打入。
+- **动态依赖必须显式静态 `require`**：仅靠 `pkg.scripts` 里的 `node_modules/**/*.js`
+  通配**不足以**保证被收录（该通配只遍历 pkg 已解析到的模块）。`main.ts` 中已显式
+  `require('class-validator')` / `require('class-transformer')`——`ValidationPipe`
+  经 `loadPackage()` 动态加载它们，否则运行时启动即报
+  `ERROR [PackageLoader] The "class-validator" package is missing`。
+  新增此类「运行时动态加载」的依赖时，需同样补一条显式 `require`。
 - `node-pty` 为原生模块，通过 `pkg.assets` 纳入；目标机首次运行会解压原生 `.node`。
+- 发布流程含 **Smoke test**：启动打包产物并对 `GET /api/health` 探活，同时断言日志中
+  不含 `class-validator` 缺失错误，防止该缺陷再次流入 Release。
 
 > 若目标环境对单文件二进制有兼容问题，可退回「源码部署」或 tarball 分发。
 
