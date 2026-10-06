@@ -341,10 +341,18 @@ func TestSlowSubscriberDoesNotBlock(t *testing.T) {
 		t.Fatal("Ingest blocked on a slow subscriber: the reader goroutine would stall")
 	}
 
-	// The producer must report losses. Allow a brief settle: the counter is
-	// incremented by the reader goroutine that also did the flooding.
+	// The producer must report losses. This assertion must NOT be "Dropped() > 0
+	// right now": Dropped() is a transient backlog, not a cumulative total. The
+	// pump decrements it as it emits markers, and markers are delivered as soon
+	// as the subscriber channel has room, so the counter can legitimately pass
+	// through zero even though thousands of lines were dropped. Sampling it once
+	// makes the test flaky (observed: 1 failure in ~15 runs under CI load).
+	//
+	// The durable facts are (a) the pipe's cumulative drop counter is nonzero,
+	// and (b) a marker is actually delivered — asserted by the drain loop below.
 	waitFor(t, 2*time.Second, "dropped lines to be accounted", func() bool {
-		return sub.Dropped() > 0
+		_, droppedTotal, _ := p.Stats()
+		return droppedTotal > 0
 	})
 
 	// Now drain: the first lines delivered should include an explicit marker

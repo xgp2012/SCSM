@@ -20,6 +20,21 @@ func readTestdata(t *testing.T, name string) string {
 	return string(data)
 }
 
+// isolateFromHostDotnet makes FindDotnet deterministic on machines that already
+// have .NET installed in one of the well-known locations.
+//
+// Setting PATH and DOTNET_ROOT is not enough on its own: FindDotnet also probes
+// candidatePaths(), and the GitHub Actions ubuntu-latest image ships
+// /usr/share/dotnet/dotnet. Without this, tests asserting "not found" pass on a
+// bare host and fail in CI. Tests that need the real candidate list must not
+// call it.
+func isolateFromHostDotnet(t *testing.T) {
+	t.Helper()
+	prev := candidatePathsOverride
+	candidatePathsOverride = []string{}
+	t.Cleanup(func() { candidatePathsOverride = prev })
+}
+
 func TestParseListRuntimesRealSamples(t *testing.T) {
 	t.Parallel()
 
@@ -476,6 +491,8 @@ func TestFindDotnetPrefersDotnetRoot(t *testing.T) {
 }
 
 func TestFindDotnetIgnoresNonExecutableDotnetRoot(t *testing.T) {
+	isolateFromHostDotnet(t)
+
 	dir := t.TempDir()
 	// Present but not executable: must fall through, not be selected.
 	if err := os.WriteFile(filepath.Join(dir, "dotnet"), []byte("#!/bin/sh\n"), 0o644); err != nil {
@@ -491,6 +508,8 @@ func TestFindDotnetIgnoresNonExecutableDotnetRoot(t *testing.T) {
 }
 
 func TestFindDotnetIgnoresDOTNET_ROOTDirectory(t *testing.T) {
+	isolateFromHostDotnet(t)
+
 	dir := t.TempDir()
 	// A *directory* named dotnet must not be returned as the host.
 	if err := os.Mkdir(filepath.Join(dir, "dotnet"), 0o755); err != nil {

@@ -94,7 +94,17 @@ var ErrDotnetNotFound = errors.New("runtime: dotnet executable not found")
 // not on PATH. The plan's §9.1 installs via dotnet-install.sh, which defaults
 // to ~/.dotnet/dotnet — the single most common reason a working runtime looks
 // "missing" when the panel runs under systemd with a minimal PATH.
+//
+// candidatePathsOverride exists only so tests can isolate themselves from a
+// host that has .NET preinstalled in one of these locations (GitHub's
+// ubuntu-latest images ship /usr/share/dotnet/dotnet, for example). It is nil in
+// production, where the list below is always used.
+var candidatePathsOverride []string
+
 func candidatePaths() []string {
+	if candidatePathsOverride != nil {
+		return candidatePathsOverride
+	}
 	home, _ := os.UserHomeDir()
 	out := []string{
 		"/usr/share/dotnet/dotnet",
