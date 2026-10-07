@@ -32,8 +32,11 @@ func TestDefaultAdminPasswordLengthsMatchAuthPolicy(t *testing.T) {
 	// Values mirrored from internal/auth/password.go. If this test fails, the
 	// mismatch is the finding: update MinAdminPasswordLength /
 	// MaxAdminPasswordLength in panel.go to match auth, not the other way round.
+	//
+	// authMinPasswordLength was lowered from 8 to 6 when adfmin (6 characters)
+	// became the configured initial administrator password.
 	const (
-		authMinPasswordLength = 8
+		authMinPasswordLength = 6
 		authMaxPasswordLength = 72
 	)
 	if MinAdminPasswordLength != authMinPasswordLength {
@@ -56,16 +59,16 @@ func TestValidateDefaultAdminPassword(t *testing.T) {
 	}{
 		{"unset is fine", "", false},
 		{"a normal 10-character password", "adfmin2026", false},
-		{"exactly at the minimum", "abcdefgh", false},
+		{"the configured default, 6 characters", "adfmin", false},
+		{"exactly at the minimum", "abcdef", false},
 		{"exactly at the maximum", strings.Repeat("a", 72), false},
 		{"common forms are accepted here", "Passw0rd!X", false},
 
-		// The case that prompted this work: 6 characters is below the policy.
-		{"too short", "adfmin", true},
-		{"one below the minimum", "abcdefg", true},
+		{"too short", "abcde", true},
+		{"one below the minimum", "abcde", true},
 		{"blank", "   ", true},
-		{"leading whitespace", " adfmin2026", true},
-		{"trailing whitespace", "adfmin2026 ", true},
+		{"leading whitespace", " adfmin", true},
+		{"trailing whitespace", "adfmin ", true},
 		{"tabs only", "\t\t\t\t", true},
 		{"over the bcrypt limit", strings.Repeat("a", 73), true},
 	}
@@ -168,7 +171,28 @@ func TestLoadPanelReadsDefaultAdminPassword(t *testing.T) {
 // TestLoadPanelRejectsShortDefaultAdminPassword proves the policy is enforced at
 // load time, before the database is opened — so a bad value fails the start-up
 // rather than producing a panel nobody can log into.
+//
+// The value below is one character under the current floor (6). It was "adfmin"
+// while the floor was 8; that is now the accepted default, so the test uses a
+// value that is still invalid.
 func TestLoadPanelRejectsShortDefaultAdminPassword(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := "default_admin_password: \"abcde\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := LoadPanel(path); err == nil {
+		t.Fatal("LoadPanel accepted a 5-character default_admin_password, want an error")
+	}
+}
+
+// TestLoadPanelAcceptsTheConfiguredDefault pins the value actually shipped in
+// configs/config.example.yaml, so lowering it further (or raising the floor
+// again) breaks a test rather than silently shipping a config the panel refuses
+// to start with.
+func TestLoadPanelAcceptsTheConfiguredDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	body := "default_admin_password: \"adfmin\"\n"
@@ -176,7 +200,11 @@ func TestLoadPanelRejectsShortDefaultAdminPassword(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	if _, err := LoadPanel(path); err == nil {
-		t.Fatal("LoadPanel accepted a 6-character default_admin_password, want an error")
+	p, err := LoadPanel(path)
+	if err != nil {
+		t.Fatalf("LoadPanel rejected the shipped default_admin_password: %v", err)
+	}
+	if p.DefaultAdminPassword != "adfmin" {
+		t.Errorf("DefaultAdminPassword = %q, want %q", p.DefaultAdminPassword, "adfmin")
 	}
 }

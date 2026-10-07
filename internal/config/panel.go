@@ -56,7 +56,11 @@ const (
 // the duplication cannot drift silently.
 const (
 	// MinAdminPasswordLength matches auth.MinPasswordLength.
-	MinAdminPasswordLength = 8
+	//
+	// It was lowered to 6 alongside that constant to admit the configured
+	// initial password. Keep the two equal:
+	// TestDefaultAdminPasswordLengthsMatchAuthPolicy fails if they drift.
+	MinAdminPasswordLength = 6
 	// MaxAdminPasswordLength matches auth.MaxPasswordLength (bcrypt's 72-byte
 	// input limit).
 	MaxAdminPasswordLength = 72

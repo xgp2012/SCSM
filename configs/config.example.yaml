@@ -47,22 +47,26 @@ term: "xterm-256color"
 # basic    = degraded, uncoloured output (recorded per instance when PTY fails)
 color_mode: "enhanced"
 
-# Optional: the administrator's initial password, applied the first time the
-# database is created. Leave it unset (the default, and the recommended setting)
-# and the panel instead forces you through a one-time setup screen to choose a
-# password before it serves anything.
+# The administrator's initial password, applied the first time the database is
+# created. Comment this out to get the default behaviour instead: the panel then
+# forces you through a one-time setup screen to choose a password before it
+# serves anything.
 #
-# Only set this for unattended provisioning, where nobody is watching the first
-# start. Two things make that a real trade-off:
-#   * the value sits in this file in plain text, and
-#   * the panel binds 0.0.0.0 by default, so a known initial password is
-#     reachable by anything that can reach the port.
-# Change it in the panel (账户 → 修改密码) as soon as you log in.
+# ⚠️ THIS VALUE IS PUBLIC. It is committed in this repository, so any panel
+# deployed with it unchanged — and reachable on the network, which the default
+# listen address 0.0.0.0:7000 allows — is accessible to anyone who reads this
+# file. Change it in the panel (账户 → 修改密码) immediately after logging in.
+#
+# Two things make that warning non-theoretical:
+#   * the value sits here in plain text, and
+#   * `adfmin` is 6 characters. The panel's policy floor was lowered from 8 to 6
+#     to admit it (auth.MinPasswordLength), which weakens EVERY password in the
+#     panel, not just this one. Raise the floor back to 8 once this is changed.
 #
 # It is applied only while the admin account still has no password, so leaving
 # the line here after the first start is harmless — it can never overwrite a
-# password you set later. Minimum 8 characters; must be quoted.
-# default_admin_password: "adfmin2026"
+# password you set later. Must be quoted.
+default_admin_password: "adfmin"
 
 defaults:
   # How long a graceful stop waits before escalating to SIGKILL.

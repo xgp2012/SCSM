@@ -30,7 +30,19 @@ const BcryptCost = 12
 // encourages password reuse on sticky notes.
 const (
 	// MinPasswordLength is the shortest accepted password.
-	MinPasswordLength = 8
+	//
+	// Lowered from 8 to 6 so the configured initial administrator password
+	// (`default_admin_password: "adfmin"`) is representable. This is a real
+	// weakening that applies to EVERY password in the panel, including the
+	// in-panel change-password form, not just the seeded one: a 6-character
+	// password is now accepted anywhere a password is set.
+	//
+	// The panel binds 0.0.0.0 by default, so this floor is the only thing
+	// standing between a reachable port and a guessable credential. Raise it
+	// back to 8 (and config.MinAdminPasswordLength with it — the two are
+	// asserted equal by TestDefaultAdminPasswordLengthsMatchAuthPolicy) if the
+	// initial password is ever changed to something longer.
+	MinPasswordLength = 6
 	// MaxPasswordLength caps input length. bcrypt silently truncates at 72
 	// bytes, so anything longer is rejected rather than accepted-and-truncated.
 	MaxPasswordLength = 72

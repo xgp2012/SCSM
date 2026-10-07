@@ -50,7 +50,10 @@ func TestValidatePasswordPolicy(t *testing.T) {
 	}{
 		{"valid", "s3cure-panel-pass", nil},
 		{"too short", "short", ErrPasswordTooShort},
-		{"seven chars", "abcdefg", ErrPasswordTooShort},
+		{"five chars", "abcde", ErrPasswordTooShort},
+		{"exactly six", "abcdef", nil},
+		{"seven chars", "abcdefg", nil},
+		{"the configured initial admin password", "adfmin", nil},
 		{"exactly eight", "abcdefgh", nil},
 		{"too long", strings.Repeat("a", 73), ErrPasswordTooLong},
 		{"exactly 72", strings.Repeat("a", 72), nil},
