@@ -69,7 +69,7 @@ func run() error {
 	slog.SetDefault(logger)
 
 	build := version.Get()
-	logger.Info("starting scnetm",
+	logger.Info("正在启动 scnetm",
 		"version", build.Version,
 		"commit", build.Commit,
 		"built", build.BuildTime,
@@ -96,7 +96,7 @@ func run() error {
 		return err
 	}
 
-	logger.Info("configuration loaded", "config", panel.Redacted())
+	logger.Info("配置已加载", "config", panel.Redacted())
 
 	// 2. Directories. The panel must start on a clean host, so create them.
 	created, err := panel.EnsureDirs()
@@ -104,7 +104,7 @@ func run() error {
 		return err
 	}
 	if len(created) > 0 {
-		logger.Info("created directories", "dirs", created)
+		logger.Info("已创建目录", "dirs", created)
 	}
 
 	// 3. Database: open + migrate. Safe to run on every start.
@@ -122,7 +122,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger.Info("database ready",
+	logger.Info("数据库就绪",
 		"path", dbPath,
 		"schema_version", schemaVersion,
 		"latest_schema_version", store.LatestSchemaVersion(),
@@ -154,7 +154,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", panel.Listen, err)
 	}
-	logger.Info("listening", "addr", ln.Addr().String(), "url", displayURL(ln.Addr()))
+	logger.Info("正在监听", "addr", ln.Addr().String(), "url", displayURL(ln.Addr()))
 
 	// 6. Serve until a signal arrives.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -178,7 +178,7 @@ func run() error {
 
 	case <-ctx.Done():
 		stop() // restore default signal handling: a second ^C kills immediately
-		logger.Info("shutdown signal received, draining connections",
+		logger.Info("收到退出信号，正在排空连接",
 			"timeout", shutdownTimeout.String())
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -188,11 +188,11 @@ func run() error {
 		// never orphaned when the panel exits. Each stop walks the graceful
 		// ladder (§5.4), which is what protects the save.
 		if err := shutdownAPI(shutdownCtx); err != nil {
-			logger.Error("stopping supervised instances reported an error", "error", err)
+			logger.Error("停止受管实例时出错", "error", err)
 		}
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Error("graceful shutdown failed, forcing close", "error", err)
+			logger.Error("优雅退出失败，强制关闭", "error", err)
 			if closeErr := srv.Close(); closeErr != nil {
 				return fmt.Errorf("close server: %w", closeErr)
 			}
@@ -200,7 +200,7 @@ func run() error {
 		if err := <-serveErr; err != nil {
 			return fmt.Errorf("serve: %w", err)
 		}
-		logger.Info("stopped cleanly")
+		logger.Info("已干净退出")
 		return nil
 	}
 }
@@ -258,7 +258,7 @@ func buildHandler(panel *config.Panel, db *sql.DB, logger *slog.Logger, build ve
 	// shell with HTTP 200, which looks like success to a client.
 	shutdownAPI := func(context.Context) error { return nil }
 	if apiHandler, stop, err := buildAPI(panel, db, logger, build); err != nil {
-		logger.Error("api not mounted; panel will serve only the frontend and /healthz",
+		logger.Error("API 未挂载；面板将只提供前端与 /healthz",
 			"error", err)
 	} else {
 		for _, prefix := range apiPrefixes {
@@ -275,10 +275,10 @@ func buildHandler(panel *config.Panel, db *sql.DB, logger *slog.Logger, build ve
 	frontendBuilt := webui.Available()
 
 	if frontendBuilt {
-		logger.Info("serving embedded frontend")
+		logger.Info("正在提供内嵌前端")
 	} else {
-		logger.Warn("no frontend build embedded; serving a placeholder page at / " +
-			"(run `make web && make build` to embed the real UI)")
+		logger.Warn("未内嵌前端构建产物；将在 / 提供占位页面" +
+			"（运行 `make web && make build` 可嵌入真实界面）")
 	}
 
 	mux.Handle("/", spaHandler(assets, frontendBuilt))

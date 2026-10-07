@@ -49,15 +49,15 @@ type authConfig struct {
 func authenticate(c *gin.Context, cfg authConfig, allowQueryToken bool) (*Principal, *APIError) {
 	token, viaQuery := extractToken(c, allowQueryToken)
 	if token == "" {
-		return nil, Unauthorized("missing authentication token")
+		return nil, Unauthorized("缺少认证令牌")
 	}
 
 	claims, err := cfg.issuer.Parse(token)
 	if err != nil {
 		if errors.Is(err, auth.ErrTokenRevoked) {
-			return nil, Unauthorized("session has been logged out")
+			return nil, Unauthorized("会话已注销")
 		}
-		return nil, Unauthorized("invalid or expired token").WithCause(err)
+		return nil, Unauthorized("令牌无效或已过期").WithCause(err)
 	}
 
 	// Denylist check: a logged-out token must stop working immediately.
@@ -65,15 +65,15 @@ func authenticate(c *gin.Context, cfg authConfig, allowQueryToken bool) (*Princi
 	if err != nil {
 		// A broken session store must not silently fail open; treat it as an
 		// unavailable dependency.
-		return nil, Unavailable("session store is unavailable").WithCause(err)
+		return nil, Unavailable("会话存储不可用").WithCause(err)
 	}
 	if revoked {
-		return nil, Unauthorized("session has been logged out")
+		return nil, Unauthorized("会话已注销")
 	}
 
 	userID, err := claims.UserID()
 	if err != nil {
-		return nil, Unauthorized("invalid token subject").WithCause(err)
+		return nil, Unauthorized("令牌主体无效").WithCause(err)
 	}
 
 	// Per-user revocation floor: "log out everywhere" and a password reset do
@@ -89,7 +89,7 @@ func authenticate(c *gin.Context, cfg authConfig, allowQueryToken bool) (*Princi
 		// the token to be issued strictly later closes that window.
 		issued := claims.IssuedAt
 		if issued == nil || !issued.Time.Truncate(time.Second).After(floor.Truncate(time.Second)) {
-			return nil, Unauthorized("this session was ended by a password change or a mass logout")
+			return nil, Unauthorized("该会话因密码变更或批量登出而结束")
 		}
 	}
 
@@ -109,13 +109,13 @@ func authenticate(c *gin.Context, cfg authConfig, allowQueryToken bool) (*Princi
 	// of truth — but an explicit ErrNotFound means the account is gone.
 	if u, err := cfg.users.GetByID(c.Request.Context(), userID); err == nil && u != nil {
 		if u.Disabled {
-			return nil, Forbidden("this account is disabled")
+			return nil, Forbidden("该账号已被停用")
 		}
 		p.Username = u.Username
 		p.Role = u.Role
 		p.Permissions = auth.NewPermissionSet(u.Role)
 	} else if errors.Is(err, ErrNotFound) {
-		return nil, Unauthorized("the account no longer exists")
+		return nil, Unauthorized("该账号已不存在")
 	}
 
 	return p, nil
@@ -177,11 +177,11 @@ func RequirePermission(perm auth.Permission) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p, ok := PrincipalFrom(c)
 		if !ok {
-			Fail(c, Unauthorized("authentication required"))
+			Fail(c, Unauthorized("需要认证"))
 			return
 		}
 		if !p.Can(perm) {
-			Fail(c, Forbidden("role %q is not permitted to %s", p.Role, perm))
+			Fail(c, Forbidden("角色 %q 无权执行 %s", p.Role, perm))
 			return
 		}
 		c.Next()
@@ -198,7 +198,7 @@ func (s *Server) requireInstance(perm auth.Permission) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p, ok := PrincipalFrom(c)
 		if !ok {
-			Fail(c, Unauthorized("authentication required"))
+			Fail(c, Unauthorized("需要认证"))
 			return
 		}
 
@@ -233,7 +233,7 @@ func instanceIDParam(c *gin.Context) (int64, *APIError) {
 	raw := c.Param("id")
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, ValidationFailed("instance id must be a positive integer, got %q", raw)
+		return 0, ValidationFailed("实例 id 必须为正整数，实际为 %q", raw)
 	}
 	return id, nil
 }
@@ -335,7 +335,7 @@ func methodNotAllowed(feature string) gin.HandlerFunc {
 		Fail(c, &APIError{
 			Status:  http.StatusMethodNotAllowed,
 			Code:    "method_not_allowed",
-			Message: "method not allowed for " + feature,
+			Message: "该资源不支持此请求方法：" + feature,
 		})
 	}
 }

@@ -145,7 +145,7 @@ func InvalidCredentials() *APIError {
 	return &APIError{
 		Status:  http.StatusUnauthorized,
 		Code:    CodeInvalidCredentials,
-		Message: "invalid username or password",
+		Message: "用户名或密码错误",
 	}
 }
 
@@ -156,7 +156,7 @@ func SetupRequired() *APIError {
 	return &APIError{
 		Status:  http.StatusConflict,
 		Code:    CodeSetupRequired,
-		Message: "panel setup is not complete: set the administrator password via POST /api/v1/auth/setup",
+		Message: "面板尚未完成初始化：请通过 POST /api/v1/auth/setup 设置管理员密码",
 	}
 }
 
@@ -165,7 +165,7 @@ func AccountLocked(retryAfterSeconds int) *APIError {
 	return &APIError{
 		Status:  http.StatusTooManyRequests,
 		Code:    CodeAccountLocked,
-		Message: "too many failed login attempts; the account is temporarily locked",
+		Message: "登录失败次数过多；该账号已被临时锁定",
 		Details: gin.H{"retry_after_seconds": retryAfterSeconds},
 	}
 }
@@ -191,7 +191,7 @@ func RateLimited(retryAfterSeconds int) *APIError {
 	return &APIError{
 		Status:  http.StatusTooManyRequests,
 		Code:    CodeRateLimited,
-		Message: "rate limit exceeded",
+		Message: "请求过于频繁，已触发限流",
 		Details: gin.H{"retry_after_seconds": retryAfterSeconds},
 	}
 }
@@ -213,7 +213,7 @@ func NotImplemented(what string) *APIError {
 	return &APIError{
 		Status:  http.StatusNotImplemented,
 		Code:    CodeNotImplemented,
-		Message: sprintf("%s is not implemented in this build", what),
+		Message: sprintf("当前版本尚未实现：%s", what),
 	}
 }
 
@@ -227,7 +227,7 @@ func Internal(err error) *APIError {
 	return &APIError{
 		Status:  http.StatusInternalServerError,
 		Code:    CodeInternal,
-		Message: "internal server error",
+		Message: "服务器内部错误",
 		Err:     err,
 	}
 }
@@ -272,14 +272,14 @@ func Classify(err error, notFoundMsg string) *APIError {
 	case errors.Is(err, ErrUnavailable):
 		return Unavailable("%s", err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
-		return Timeout("operation timed out")
+		return Timeout("操作超时")
 	case errors.Is(err, context.Canceled):
 		// The client went away; 499 is the nginx convention and is not a real
 		// status code, so use 408 for a request-scoped timeout instead.
 		return &APIError{
 			Status:  http.StatusRequestTimeout,
 			Code:    "request_canceled",
-			Message: "the request was canceled",
+			Message: "请求已被取消",
 			Err:     err,
 		}
 	case errors.Is(err, auth.ErrForbidden):
@@ -287,7 +287,7 @@ func Classify(err error, notFoundMsg string) *APIError {
 	case errors.Is(err, auth.ErrTokenInvalid), errors.Is(err, auth.ErrTokenAlgorithm):
 		return Unauthorized("%s", err.Error())
 	case errors.Is(err, auth.ErrTokenRevoked):
-		return Unauthorized("session has been logged out")
+		return Unauthorized("会话已注销")
 	}
 	return Internal(err)
 }
@@ -315,7 +315,7 @@ func IsNotImplemented(err error) bool {
 // shape is uniform; the frontend then never has to guess between a Gin default
 // 400 body and a panel error body.
 func Abort(c *gin.Context, err error) {
-	apiErr := Classify(err, "resource not found")
+	apiErr := Classify(err, "资源不存在")
 	Fail(c, apiErr)
 }
 

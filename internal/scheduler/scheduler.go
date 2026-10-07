@@ -804,7 +804,7 @@ func NewRestartJob(instanceID int64, payload RestartPayload, restart RestartFunc
 	}
 	message := payload.Message
 	if message == "" {
-		message = fmt.Sprintf("Server restarting in %d seconds", payload.WarnSeconds)
+		message = fmt.Sprintf("服务器将在 %d 秒后重启", payload.WarnSeconds)
 	}
 	return &RestartJob{
 		instanceID:  instanceID,

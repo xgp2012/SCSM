@@ -32,12 +32,12 @@ func (s *Server) handleEventsWS(c *gin.Context) {
 	// which every authenticated role is allowed to see. The per-event payload
 	// is deliberately kept free of anything role-restricted.
 	if !p.Can(permInstanceRead) {
-		Fail(c, Forbidden("role %q may not subscribe to panel events", p.Role))
+		Fail(c, Forbidden("角色 %q 无权订阅面板事件", p.Role))
 		return
 	}
 
 	if !s.originAllowed(c) {
-		Fail(c, Forbidden("the WebSocket origin is not allowed"))
+		Fail(c, Forbidden("WebSocket 来源不在允许列表中"))
 		return
 	}
 

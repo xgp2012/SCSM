@@ -144,7 +144,7 @@ func (s *Server) handleBackupWorld(c *gin.Context) {
 	var req WorldBackupRequest
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			Fail(c, BadRequest("invalid backup request: %v", err))
+			Fail(c, BadRequest("备份请求格式无效：%v", err))
 			return
 		}
 	}
@@ -181,20 +181,20 @@ func (s *Server) handleRestoreWorld(c *gin.Context) {
 
 	var req WorldRestoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid restore request: %v", err))
+		Fail(c, BadRequest("恢复请求格式无效：%v", err))
 		return
 	}
 
 	// Destructive and irreversible: require an explicit confirmation, as §6.3
 	// asks for the restore path.
 	if !req.Confirm {
-		Fail(c, Conflict("restore replaces the current world content; set \"confirm\": true to proceed").
+		Fail(c, Conflict("恢复操作会覆盖当前世界内容；如需继续请设置 \"confirm\": true").
 			WithDetail(gin.H{"world": dirName, "backup_id": req.BackupID}))
 		return
 	}
 	// A restore while the server is writing regions would corrupt the save.
 	if live, ok := s.deps.Process.State(inst.ID); ok && live.State == StateRunning {
-		Fail(c, Conflict("the instance is running; stop it before restoring a world").
+		Fail(c, Conflict("实例正在运行；请先停止再恢复世界").
 			WithDetail(gin.H{"state": live.State, "world": dirName}))
 		return
 	}
@@ -239,7 +239,7 @@ func (s *Server) handleActivateWorld(c *gin.Context) {
 	if live, ok := s.deps.Process.State(inst.ID); ok {
 		switch live.State {
 		case StateRunning, StateStarting, StateRestarting:
-			Fail(c, Conflict("the instance is %s; stop it before switching the active world", live.State).
+			Fail(c, Conflict("实例处于 %s 状态；请先停止再切换当前世界", live.State).
 				WithDetail(gin.H{"state": live.State, "world": dirName}))
 			return
 		}
@@ -286,7 +286,7 @@ func (s *Server) handleDeleteWorld(c *gin.Context) {
 	// nothing. The service enforces this too; catching it here produces a much
 	// clearer message.
 	if live, ok := s.deps.Process.State(inst.ID); ok && live.State == StateRunning {
-		Fail(c, Conflict("the instance is running; stop it before deleting a world").
+		Fail(c, Conflict("实例正在运行；请先停止再删除世界").
 			WithDetail(gin.H{"state": live.State, "world": dirName}))
 		return
 	}
@@ -315,17 +315,17 @@ func (s *Server) handleDeleteWorld(c *gin.Context) {
 func (s *Server) worldDirParam(c *gin.Context) (string, *APIError) {
 	raw := strings.TrimSpace(c.Param("w"))
 	if raw == "" {
-		return "", ValidationFailed("a world directory name is required")
+		return "", ValidationFailed("必须提供世界目录名")
 	}
 	if strings.ContainsAny(raw, `/\`) || raw == "." || raw == ".." || strings.Contains(raw, "..") {
-		return "", ValidationFailed("world directory name must not contain path separators or \"..\"").
+		return "", ValidationFailed("世界目录名不得包含路径分隔符或 \"..\"").
 			WithDetail(gin.H{"world": raw})
 	}
 	if strings.ContainsRune(raw, 0) {
-		return "", ValidationFailed("world directory name must not contain NUL bytes")
+		return "", ValidationFailed("世界目录名不得包含 NUL 字节")
 	}
 	if len(raw) > 128 {
-		return "", ValidationFailed("world directory name is too long")
+		return "", ValidationFailed("世界目录名过长")
 	}
 	return raw, nil
 }
@@ -377,11 +377,11 @@ func readZipUpload(c *gin.Context, maxBytes int64) (data []byte, name string, er
 	fh, ferr := c.FormFile("file")
 	if ferr == nil && fh != nil {
 		if maxBytes > 0 && fh.Size > maxBytes {
-			return nil, "", PayloadTooLarge("the archive exceeds the %s upload limit", humanSize(maxBytes))
+			return nil, "", PayloadTooLarge("归档大小超过 %s 的上传上限", humanSize(maxBytes))
 		}
 		f, oerr := fh.Open()
 		if oerr != nil {
-			return nil, "", BadRequest("could not read the uploaded archive: %v", oerr)
+			return nil, "", BadRequest("无法读取上传的归档文件：%v", oerr)
 		}
 		defer f.Close()
 
@@ -393,14 +393,14 @@ func readZipUpload(c *gin.Context, maxBytes int64) (data []byte, name string, er
 	}
 
 	if c.Request.Body == nil {
-		return nil, "", BadRequest("an archive is required (multipart field \"file\" or a raw request body)")
+		return nil, "", BadRequest("必须提供归档文件（multipart 字段 \"file\"，或直接使用请求体）")
 	}
 	buf, rerr := readAllLimited(c.Request.Body, maxBytes)
 	if rerr != nil {
 		return nil, "", rerr
 	}
 	if len(buf) == 0 {
-		return nil, "", BadRequest("the request body is empty")
+		return nil, "", BadRequest("请求体为空")
 	}
 	return buf, c.Query("name"), nil
 }

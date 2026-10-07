@@ -67,7 +67,7 @@ func (s *Server) handleListInstances(c *gin.Context) {
 
 	instances, err := s.deps.Instances.List(c.Request.Context(), filter)
 	if err != nil {
-		Fail(c, Classify(err, "no instances found"))
+		Fail(c, Classify(err, "未找到任何实例"))
 		return
 	}
 
@@ -210,7 +210,7 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 
 	var req CreateInstanceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid instance request: %v", err))
+		Fail(c, BadRequest("实例请求格式无效：%v", err))
 		return
 	}
 
@@ -225,20 +225,20 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 	// Uniqueness: check explicitly so we can return a precise 409 rather than
 	// relying on the store's error text.
 	if existing, err := s.deps.Instances.GetByName(ctx, req.Name); err == nil && existing != nil {
-		Fail(c, Conflict("an instance named %q already exists", req.Name).WithDetail(gin.H{
+		Fail(c, Conflict("已存在名为 %q 的实例", req.Name).WithDetail(gin.H{
 			"instance_id": existing.ID,
 			"name":        req.Name,
 		}))
 		return
 	} else if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNotImplemented) {
-		Fail(c, Classify(err, "could not check instance name"))
+		Fail(c, Classify(err, "无法检查实例名称"))
 		return
 	}
 
 	// --- port allocation (UDP) ---
 	usedPorts, err := s.deps.Instances.ListUsedPorts(ctx)
 	if err != nil && !errors.Is(err, ErrNotImplemented) {
-		Fail(c, Classify(err, "could not read instance ports"))
+		Fail(c, Classify(err, "无法读取实例端口"))
 		return
 	}
 	usedPorts = append(usedPorts, s.reservations.Held()...)
@@ -249,7 +249,7 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 		if err != nil {
 			// Pool exhaustion is a conflict, not a server error: the operator
 			// must extend the pool or free a port.
-			Fail(c, Conflict("could not allocate a UDP port: %v", err).WithDetail(gin.H{
+			Fail(c, Conflict("无法分配 UDP 端口：%v", err).WithDetail(gin.H{
 				"pool_start": s.portPool().Start,
 				"pool_end":   s.portPool().End,
 			}))
@@ -263,7 +263,7 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 		}
 		for _, u := range usedPorts {
 			if u == port {
-				Fail(c, Conflict("UDP port %d is already assigned to another instance", port).WithDetail(gin.H{"port": port}))
+				Fail(c, Conflict("UDP 端口 %d 已被其他实例占用", port).WithDetail(gin.H{"port": port}))
 				return
 			}
 		}
@@ -271,7 +271,7 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 		// UDP. CheckPortFree binds a UDP socket; a TCP check would give both
 		// false positives and false negatives here.
 		if err := CheckPortFree(port); err != nil {
-			Fail(c, Conflict("UDP port %d is already in use on this host", port).WithDetail(gin.H{
+			Fail(c, Conflict("UDP 端口 %d 已被本机其他程序占用", port).WithDetail(gin.H{
 				"port":     port,
 				"protocol": "udp",
 			}))
@@ -282,7 +282,7 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 	// Reserve the port so two concurrent creates cannot pick the same one
 	// before either has committed its row.
 	if !s.reservations.Reserve(port) {
-		Fail(c, Conflict("UDP port %d was claimed by another request", port))
+		Fail(c, Conflict("UDP 端口 %d 已被其他请求抢占", port))
 		return
 	}
 	committed := false
@@ -295,14 +295,14 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 	// --- directory ---
 	root := s.instancesDir()
 	if root == "" {
-		Fail(c, Unavailable("the instances directory is not configured"))
+		Fail(c, Unavailable("未配置实例目录"))
 		return
 	}
 	dirName := req.Name
 	if req.Dir != "" {
 		dirName = strings.TrimSpace(req.Dir)
 		if err := ValidateInstanceName(dirName); err != nil {
-			Fail(c, ValidationFailed("invalid directory name: %v", err))
+			Fail(c, ValidationFailed("目录名无效：%v", err))
 			return
 		}
 	}
@@ -317,12 +317,12 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 	// symlink escapes.
 	dir, err := ResolveInside(root, dirName, false)
 	if err != nil {
-		Fail(c, Forbidden("instance directory rejected: %v", err).WithDetail(gin.H{"dir": dirName}))
+		Fail(c, Forbidden("实例目录被拒绝：%v", err).WithDetail(gin.H{"dir": dirName}))
 		return
 	}
 
 	if _, statErr := os.Stat(dir); statErr == nil {
-		Fail(c, Conflict("the instance directory %q already exists on disk", dirName).WithDetail(gin.H{
+		Fail(c, Conflict("实例目录 %q 在磁盘上已存在", dirName).WithDetail(gin.H{
 			"dir": dir,
 		}))
 		return
@@ -375,21 +375,21 @@ func (s *Server) handleCreateInstance(c *gin.Context) {
 			loggerFrom(c).Warn("could not roll back instance directory",
 				"dir", dir, "err", rmErr.Error())
 		}
-		Fail(c, Internal(fmt.Errorf("provisioning instance directory: %w", err)))
+		Fail(c, Internal(fmt.Errorf("初始化实例目录: %w", err)))
 		return
 	}
 
 	if err := s.deps.Instances.Create(ctx, created); err != nil {
 		_ = SafeRemoveAll(root, dir)
 		if errors.Is(err, ErrConflict) {
-			Fail(c, Conflict("an instance named %q already exists", req.Name))
+			Fail(c, Conflict("已存在名为 %q 的实例", req.Name))
 			return
 		}
 		if errors.Is(err, ErrInvalid) {
 			Fail(c, ValidationFailed("%v", err))
 			return
 		}
-		Fail(c, Classify(err, "could not create instance"))
+		Fail(c, Classify(err, "无法创建实例"))
 		return
 	}
 	committed = true
@@ -608,7 +608,7 @@ func (s *Server) handleUpdateInstance(c *gin.Context) {
 		ColorMode      *string `json:"color_mode,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid update request: %v", err))
+		Fail(c, BadRequest("更新请求格式无效：%v", err))
 		return
 	}
 
@@ -624,14 +624,14 @@ func (s *Server) handleUpdateInstance(c *gin.Context) {
 	}
 	if req.MaxRestart != nil {
 		if *req.MaxRestart < 0 || *req.MaxRestart > 100 {
-			Fail(c, ValidationFailed("max_restart must be between 0 and 100"))
+			Fail(c, ValidationFailed("max_restart 必须在 0 到 100 之间"))
 			return
 		}
 		inst.MaxRestart = *req.MaxRestart
 	}
 	if req.StopTimeoutSec != nil {
 		if *req.StopTimeoutSec < 0 || *req.StopTimeoutSec > 600 {
-			Fail(c, ValidationFailed("stop_timeout_sec must be between 0 and 600"))
+			Fail(c, ValidationFailed("stop_timeout_sec 必须在 0 到 600 之间"))
 			return
 		}
 		inst.StopTimeoutSec = *req.StopTimeoutSec
@@ -641,13 +641,13 @@ func (s *Server) handleUpdateInstance(c *gin.Context) {
 		case "enhanced", "basic":
 			inst.ColorMode = *req.ColorMode
 		default:
-			Fail(c, ValidationFailed("color_mode must be \"enhanced\" or \"basic\""))
+			Fail(c, ValidationFailed("color_mode 必须为 \"enhanced\" 或 \"basic\""))
 			return
 		}
 	}
 
 	if err := s.deps.Instances.Update(c.Request.Context(), inst); err != nil {
-		Fail(c, Classify(err, "instance not found"))
+		Fail(c, Classify(err, "实例不存在"))
 		return
 	}
 
@@ -685,14 +685,14 @@ func (s *Server) handleDeleteInstance(c *gin.Context) {
 	var req DeleteInstanceRequest
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			Fail(c, BadRequest("invalid delete request: %v", err))
+			Fail(c, BadRequest("删除请求格式无效：%v", err))
 			return
 		}
 	}
 
 	if req.DeleteDir {
 		if req.ConfirmName != inst.Name {
-			Fail(c, ValidationFailed("confirm_name must exactly match the instance name %q to delete its directory", inst.Name).WithDetail(gin.H{
+			Fail(c, ValidationFailed("confirm_name 必须与实例名 %q 完全一致才能删除其目录", inst.Name).WithDetail(gin.H{
 				"expected": inst.Name,
 				"got":      req.ConfirmName,
 			}))
@@ -703,7 +703,7 @@ func (s *Server) handleDeleteInstance(c *gin.Context) {
 		if live, ok := s.deps.Process.State(inst.ID); ok {
 			switch live.State {
 			case StateRunning, StateStarting, StateStopping, StateRestarting:
-				Fail(c, Conflict("instance %q is %s; stop it before deleting its directory", inst.Name, live.State).
+				Fail(c, Conflict("实例 %q 处于 %s 状态；请先停止再删除其目录", inst.Name, live.State).
 					WithDetail(gin.H{"state": live.State}))
 				return
 			}
@@ -711,7 +711,7 @@ func (s *Server) handleDeleteInstance(c *gin.Context) {
 	}
 
 	if err := s.deps.Instances.Delete(ctx, inst.ID); err != nil {
-		Fail(c, Classify(err, "instance not found"))
+		Fail(c, Classify(err, "实例不存在"))
 		return
 	}
 
@@ -768,14 +768,14 @@ func (s *Server) handleStartInstance(c *gin.Context) {
 	if live, ok := s.deps.Process.State(inst.ID); ok {
 		switch live.State {
 		case StateRunning:
-			Fail(c, Conflict("instance %q is already running", inst.Name).WithDetail(gin.H{
+			Fail(c, Conflict("实例 %q 已在运行中", inst.Name).WithDetail(gin.H{
 				"instance_id": inst.ID,
 				"state":       live.State,
 				"pid":         live.PID,
 			}))
 			return
 		case StateStarting, StateRestarting:
-			Fail(c, Conflict("instance %q is already starting", inst.Name).WithDetail(gin.H{
+			Fail(c, Conflict("实例 %q 已在启动中", inst.Name).WithDetail(gin.H{
 				"instance_id": inst.ID,
 				"state":       live.State,
 			}))
@@ -788,7 +788,7 @@ func (s *Server) handleStartInstance(c *gin.Context) {
 	root := s.instancesDir()
 	if root != "" && inst.Dir != "" {
 		if _, err := ResolveInside(root, filepath.Base(inst.Dir), true); err != nil {
-			Fail(c, Conflict("the instance directory is missing or unsafe: %v", err).WithDetail(gin.H{
+			Fail(c, Conflict("实例目录缺失或不安全：%v", err).WithDetail(gin.H{
 				"dir": inst.Dir,
 			}))
 			return
@@ -801,10 +801,10 @@ func (s *Server) handleStartInstance(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			Fail(c, Timeout("starting instance %q timed out", inst.Name))
+			Fail(c, Timeout("实例 %q 启动超时", inst.Name))
 			return
 		}
-		Fail(c, Classify(err, "could not start the instance"))
+		Fail(c, Classify(err, "无法启动实例"))
 		return
 	}
 
@@ -829,7 +829,7 @@ func (s *Server) handleStopInstance(c *gin.Context) {
 	// An empty body is legal and means "graceful stop".
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			Fail(c, BadRequest("invalid stop request: %v", err))
+			Fail(c, BadRequest("停止请求格式无效：%v", err))
 			return
 		}
 	}
@@ -840,7 +840,7 @@ func (s *Server) handleStopInstance(c *gin.Context) {
 	}
 	if req.TimeoutSec > 0 {
 		if req.TimeoutSec > 600 {
-			Fail(c, ValidationFailed("timeout_sec must be at most 600"))
+			Fail(c, ValidationFailed("timeout_sec 不得超过 600"))
 			return
 		}
 		timeout = time.Duration(req.TimeoutSec) * time.Second
@@ -871,13 +871,13 @@ func (s *Server) handleStopInstance(c *gin.Context) {
 				"force":      req.Force,
 				"timeout_ms": timeout.Milliseconds(),
 			})
-			Fail(c, Timeout("stopping instance %q exceeded the %s timeout", inst.Name, timeout))
+			Fail(c, Timeout("实例 %q 停止超时，已超过 %s", inst.Name, timeout))
 			return
 		case errors.Is(err, ErrConflict):
 			Fail(c, Conflict("%v", err))
 			return
 		}
-		Fail(c, Classify(err, "could not stop the instance"))
+		Fail(c, Classify(err, "无法停止实例"))
 		return
 	}
 
@@ -889,7 +889,7 @@ func (s *Server) handleStopInstance(c *gin.Context) {
 			"duration_ms": result.DurationMS,
 			"reason":      "process did not exit within the timeout",
 		})
-		Fail(c, Timeout("instance %q did not exit within the %s timeout", inst.Name, timeout).
+		Fail(c, Timeout("实例 %q 未在 %s 内退出", inst.Name, timeout).
 			WithDetail(gin.H{"forced": req.Force, "duration_ms": result.DurationMS}))
 		return
 	}
@@ -930,13 +930,13 @@ func (s *Server) handleRestartInstance(c *gin.Context) {
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			s.audit(c, "instance.restart_timeout", fmt.Sprintf("instance:%d", inst.ID), nil)
-			Fail(c, Timeout("restarting instance %q timed out", inst.Name))
+			Fail(c, Timeout("实例 %q 重启超时", inst.Name))
 			return
 		case errors.Is(err, ErrConflict):
 			Fail(c, Conflict("%v", err))
 			return
 		}
-		Fail(c, Classify(err, "could not restart the instance"))
+		Fail(c, Classify(err, "无法重启实例"))
 		return
 	}
 
@@ -990,7 +990,7 @@ func (s *Server) handleInstanceStats(c *gin.Context) {
 
 	metrics, err := s.deps.Process.Metrics(inst.ID)
 	if err != nil && !errors.Is(err, ErrNotImplemented) {
-		Fail(c, Classify(err, "could not collect metrics"))
+		Fail(c, Classify(err, "无法采集监控指标"))
 		return
 	}
 	if err != nil {

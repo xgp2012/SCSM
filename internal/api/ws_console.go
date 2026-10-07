@@ -91,7 +91,7 @@ func (s *Server) handleConsoleWS(c *gin.Context) {
 			"reason": "origin not allowed",
 			"origin": c.GetHeader("Origin"),
 		})
-		Fail(c, Forbidden("the WebSocket origin is not allowed"))
+		Fail(c, Forbidden("WebSocket 来源不在允许列表中"))
 		return
 	}
 

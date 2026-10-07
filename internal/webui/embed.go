@@ -90,7 +90,7 @@ const PlaceholderPage = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>scnetm — frontend not built</title>
+<title>scnetm — 前端尚未构建</title>
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 3rem 1.5rem; background: #18181b; color: #e4e4e7;
@@ -107,16 +107,16 @@ const PlaceholderPage = `<!doctype html>
 </head>
 <body>
 <main>
-  <h1>scnetm panel is running</h1>
-  <p class="sub">The API is up, but no frontend build is embedded in this binary.</p>
-  <p><span class="ok">&#10003;</span> <a href="/healthz" style="color:#60a5fa">/healthz</a> is available and reports the panel version.</p>
-  <p>Build the frontend, then rebuild the panel:</p>
-  <pre><code>make web      # build web/dist with Vite
-make build    # copies web/dist -> internal/webui/dist, then go build</code></pre>
-  <p>Otherwise the panel runs headless, which is fine for deployment checks:</p>
+  <h1>scnetm 面板正在运行</h1>
+  <p class="sub">API 已就绪，但当前二进制中未内嵌前端构建产物。</p>
+  <p><span class="ok">&#10003;</span> <a href="/healthz" style="color:#60a5fa">/healthz</a> 可访问，并会返回面板版本。</p>
+  <p>请先构建前端，再重新构建面板：</p>
+  <pre><code>make web      # 用 Vite 构建 web/dist
+make build    # 将 web/dist 复制到 internal/webui/dist，然后 go build</code></pre>
+  <p>否则面板将以无界面模式运行，用于部署检查没有问题：</p>
   <ul>
-    <li>no <code>.NET 10</code> runtime or game-server package is required to start the panel</li>
-    <li>instances cannot be started until both are installed</li>
+    <li>启动面板本身不需要 <code>.NET 10</code> 运行时，也不需要服务端程序包</li>
+    <li>在两者都安装之前，实例无法启动</li>
   </ul>
 </main>
 </body>

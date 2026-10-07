@@ -49,7 +49,7 @@ import (
 func (s *Server) handleLogin(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid login request: %v", err))
+		Fail(c, BadRequest("登录请求格式无效：%v", err))
 		return
 	}
 
@@ -106,7 +106,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 
 	if user.Disabled {
 		s.auditRaw(c, "auth.login_disabled", "user:"+username, gin.H{"ip": ip})
-		Fail(c, Forbidden("this account is disabled"))
+		Fail(c, Forbidden("该账号已被停用"))
 		return
 	}
 
@@ -219,12 +219,12 @@ func (s *Server) handleLogout(c *gin.Context) {
 
 	if req.AllSessions {
 		if err := s.deps.Sessions.RevokeAllForUser(c.Request.Context(), p.UserID, now); err != nil {
-			Fail(c, Unavailable("could not revoke sessions").WithCause(err))
+			Fail(c, Unavailable("无法吊销会话").WithCause(err))
 			return
 		}
 	}
 	if err := s.deps.Sessions.Revoke(c.Request.Context(), p.TokenID, p.UserID, expiry); err != nil {
-		Fail(c, Unavailable("could not revoke session").WithCause(err))
+		Fail(c, Unavailable("无法吊销会话").WithCause(err))
 		return
 	}
 
@@ -276,7 +276,7 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 		NewPassword     string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid password change request: %v", err))
+		Fail(c, BadRequest("修改密码请求格式无效：%v", err))
 		return
 	}
 
@@ -289,7 +289,7 @@ func (s *Server) handleChangePassword(c *gin.Context) {
 		s.auditRaw(c, "auth.password_change_failed", fmt.Sprintf("user:%d", p.UserID), gin.H{
 			"reason": "current password did not match",
 		})
-		Fail(c, Forbidden("the current password is incorrect"))
+		Fail(c, Forbidden("当前密码不正确"))
 		return
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
@@ -382,15 +382,15 @@ func (s *Server) handleSetupRequired(c *gin.Context) {
 func (s *Server) handleSetup(c *gin.Context) {
 	var req SetupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid setup request: %v", err))
+		Fail(c, BadRequest("初始化请求格式无效：%v", err))
 		return
 	}
 	if req.ConfirmPassword != "" && req.ConfirmPassword != req.Password {
-		Fail(c, ValidationFailed("the two passwords do not match").WithDetail(gin.H{
+		Fail(c, ValidationFailed("两次输入的密码不一致").WithDetail(gin.H{
 			"issues": []ValidationIssue{{
 				Field:    "confirm_password",
 				Code:     "password_mismatch",
-				Message:  "confirm_password must equal password",
+				Message:  "confirm_password 必须与 password 一致",
 				Severity: "error",
 			}},
 		}))
@@ -414,7 +414,7 @@ func (s *Server) handleSetup(c *gin.Context) {
 		return
 	}
 	if len(users) == 0 {
-		Fail(c, Conflict("no panel user exists to bootstrap; the store must seed an administrator"))
+		Fail(c, Conflict("没有可用于初始化的面板用户；数据库必须预置一名管理员"))
 		return
 	}
 
@@ -422,11 +422,11 @@ func (s *Server) handleSetup(c *gin.Context) {
 	// password-less admin, else the first password-less user.
 	target := selectSetupTarget(users, req.Username)
 	if target == nil {
-		Fail(c, Conflict("panel setup has already been completed"))
+		Fail(c, Conflict("面板初始化已完成"))
 		return
 	}
 	if !isFirstRunHash(target.PasswordHash) {
-		Fail(c, Conflict("panel setup has already been completed"))
+		Fail(c, Conflict("面板初始化已完成"))
 		return
 	}
 
@@ -440,7 +440,7 @@ func (s *Server) handleSetup(c *gin.Context) {
 		target.Username = clean
 		if err := s.deps.Users.Update(c.Request.Context(), target); err != nil {
 			if errors.Is(err, ErrConflict) {
-				Fail(c, Conflict("that username is already taken"))
+				Fail(c, Conflict("该用户名已被占用"))
 				return
 			}
 			Fail(c, Classify(err, "could not update the user"))
@@ -450,7 +450,7 @@ func (s *Server) handleSetup(c *gin.Context) {
 
 	if err := s.deps.Users.SetInitialPassword(c.Request.Context(), target.ID, hash); err != nil {
 		if errors.Is(err, ErrConflict) {
-			Fail(c, Conflict("panel setup has already been completed"))
+			Fail(c, Conflict("面板初始化已完成"))
 			return
 		}
 		Fail(c, Classify(err, "could not set the administrator password"))

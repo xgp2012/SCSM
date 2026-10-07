@@ -172,7 +172,7 @@ func RecoveryMiddleware(log Logger) gin.HandlerFunc {
 				if r == http.ErrAbortHandler {
 					panic(r)
 				}
-				log.Error("panic recovered",
+				log.Error("已捕获 panic",
 					"panic", fmt.Sprint(r),
 					"method", c.Request.Method,
 					"path", c.Request.URL.Path,

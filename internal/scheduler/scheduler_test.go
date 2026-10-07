@@ -1216,7 +1216,7 @@ func TestRestartJob(t *testing.T) {
 	if err := defaulted.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got, _ := gotWarning.Load().(string); !strings.Contains(got, "restarting") {
+	if got, _ := gotWarning.Load().(string); !strings.Contains(got, "重启") {
 		t.Errorf("default warning message = %q, want a restart notice", got)
 	}
 }

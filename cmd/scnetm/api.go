@@ -60,7 +60,7 @@ func buildAPI(
 		return nil, nil, err
 	}
 	if created {
-		logger.Info("generated a new JWT signing secret", "path", "jwt.secret")
+		logger.Info("已生成新的 JWT 签名密钥", "path", "jwt.secret")
 	}
 
 	issuer, err := auth.NewTokenIssuer(secret)
@@ -111,7 +111,7 @@ func buildAPI(
 		return nil, nil, err
 	}
 
-	logger.Info("api mounted", "prefixes", apiPrefixes, "instances_dir", panel.InstancesDir)
+	logger.Info("API 已挂载", "prefixes", apiPrefixes, "instances_dir", panel.InstancesDir)
 
 	shutdown := func(ctx context.Context) error {
 		return manager.Close(ctx)

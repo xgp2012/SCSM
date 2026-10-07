@@ -139,14 +139,14 @@ func (s *Server) installMiddleware() {
 }
 
 func (s *Server) handleNoRoute(c *gin.Context) {
-	Fail(c, NotFound("no route matches %s %s", c.Request.Method, c.Request.URL.Path))
+	Fail(c, NotFound("没有匹配 %s %s 的路由", c.Request.Method, c.Request.URL.Path))
 }
 
 func (s *Server) handleNoMethod(c *gin.Context) {
 	Fail(c, &APIError{
 		Status:  http.StatusMethodNotAllowed,
 		Code:    "method_not_allowed",
-		Message: "method " + c.Request.Method + " is not allowed for " + c.FullPath(),
+		Message: "路径 " + c.FullPath() + " 不支持 " + c.Request.Method + " 方法",
 	})
 }
 

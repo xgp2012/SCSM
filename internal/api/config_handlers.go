@@ -92,7 +92,7 @@ func (s *Server) handleValidateConfig(c *gin.Context) {
 
 	var req ValidateConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid validate request: %v", err))
+		Fail(c, BadRequest("校验请求格式无效：%v", err))
 		return
 	}
 
@@ -133,7 +133,7 @@ func (s *Server) handlePutConfig(c *gin.Context) {
 
 	var req UpdateConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid config update request: %v", err))
+		Fail(c, BadRequest("配置更新请求格式无效：%v", err))
 		return
 	}
 
@@ -162,14 +162,14 @@ func (s *Server) handlePutConfig(c *gin.Context) {
 			"kind":   string(kind),
 			"reason": "content is not valid JSON",
 		})
-		Fail(c, ValidationFailed("the body is not valid JSON and was not written").
+		Fail(c, ValidationFailed("请求体不是合法 JSON，未写入任何内容").
 			WithDetail(gin.H{
 				"kind":    string(kind),
 				"written": false,
 				"issues": []ValidationIssue{{
 					Field:    "content",
 					Code:     "invalid_json",
-					Message:  "the document must be a single well-formed JSON object",
+					Message:  "文档必须是单个格式正确的 JSON 对象",
 					Severity: "error",
 				}},
 			}))
@@ -203,7 +203,7 @@ func (s *Server) handlePutConfig(c *gin.Context) {
 			"reason": "validation failed",
 			"issues": result.Issues,
 		})
-		Fail(c, ValidationFailed("the configuration is invalid and was not written").
+		Fail(c, ValidationFailed("配置校验未通过，未写入任何内容").
 			WithDetail(gin.H{
 				"kind":             string(kind),
 				"issues":           result.Issues,

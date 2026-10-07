@@ -334,7 +334,7 @@ func TestLogoutInvalidatesToken(t *testing.T) {
 	// The token must now be rejected, with the revoked-session message.
 	after := ts.get(token, "/api/v1/auth/me")
 	requireErrorCode(t, after, http.StatusUnauthorized, CodeUnauthorized)
-	if !strings.Contains(after.ErrorMessage(), "logged out") {
+	if !strings.Contains(after.ErrorMessage(), "注销") {
 		t.Errorf("message = %q, want it to mention logout", after.ErrorMessage())
 	}
 }

@@ -45,7 +45,7 @@ func (s *Server) handleListJobs(c *gin.Context) {
 func (s *Server) handleCreateJob(c *gin.Context) {
 	var req JobRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid job request: %v", err))
+		Fail(c, BadRequest("任务请求格式无效：%v", err))
 		return
 	}
 
@@ -119,7 +119,7 @@ func (s *Server) handleUpdateJob(c *gin.Context) {
 
 	var req JobRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid job request: %v", err))
+		Fail(c, BadRequest("任务请求格式无效：%v", err))
 		return
 	}
 
@@ -191,30 +191,30 @@ func (s *Server) handleDeleteJob(c *gin.Context) {
 // is available (it owns the cron parser).
 func (s *Server) validateJob(c *gin.Context, job *Job) *APIError {
 	if job.Type == "" {
-		return ValidationFailed("job type is required")
+		return ValidationFailed("必须提供任务类型")
 	}
 	switch job.Type {
 	case "backup", "restart", "command", "announce":
 	default:
-		return ValidationFailed("job type must be one of backup, restart, command, announce, got %q", job.Type)
+		return ValidationFailed("任务类型必须是 backup、restart、command、announce 之一，实际为 %q", job.Type)
 	}
 	if job.Cron == "" {
-		return ValidationFailed("a cron expression is required")
+		return ValidationFailed("必须提供 cron 表达式")
 	}
 	if len(job.Cron) > 128 {
-		return ValidationFailed("the cron expression is too long")
+		return ValidationFailed("cron 表达式过长")
 	}
 
 	if s.deps.Job != nil && !isNopJobService(s.deps.Job) {
 		result, err := s.deps.Job.Validate(job)
 		if err != nil {
 			if IsNotImplemented(err) {
-				return NotImplemented("job validation (§6.7)")
+				return NotImplemented("任务校验（§6.7）")
 			}
 			return Classify(err, "invalid job")
 		}
 		if result != nil && hasValidationErrors(result) {
-			return ValidationFailed("the job is invalid").WithDetail(gin.H{"issues": result.Issues})
+			return ValidationFailed("任务无效").WithDetail(gin.H{"issues": result.Issues})
 		}
 		return nil
 	}
@@ -229,12 +229,12 @@ func (s *Server) validateJob(c *gin.Context, job *Job) *APIError {
 	// the nightly backup they configured never ran.
 	fields := strings.Fields(job.Cron)
 	if len(fields) != 5 {
-		return ValidationFailed("the cron expression must have exactly 5 fields (minute hour day month weekday), got %d", len(fields)).
+		return ValidationFailed("cron 表达式必须恰好包含 5 个字段（分 时 日 月 周），实际为 %d 个", len(fields)).
 			WithDetail(validationDetails("cron", "invalid_cron", fmt.Errorf("expected 5 fields")))
 	}
 	for i, field := range fields {
 		if err := validateCronField(i, field); err != nil {
-			return ValidationFailed("the cron expression is invalid: %v", err).
+			return ValidationFailed("cron 表达式无效：%v", err).
 				WithDetail(validationDetails("cron", "invalid_cron", err))
 		}
 	}

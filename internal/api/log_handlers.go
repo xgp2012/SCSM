@@ -37,7 +37,7 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 
 	var q LogsQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
-		Fail(c, BadRequest("invalid log query: %v", err))
+		Fail(c, BadRequest("日志查询参数格式无效：%v", err))
 		return
 	}
 
@@ -46,7 +46,7 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 		tail = DefaultLogTail
 	}
 	if tail > MaxLogTail {
-		Fail(c, ValidationFailed("tail must be at most %d", MaxLogTail).
+		Fail(c, ValidationFailed("tail 不得超过 %d", MaxLogTail).
 			WithDetail(gin.H{"max_tail": MaxLogTail}))
 		return
 	}
@@ -55,7 +55,7 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 	// rather than an opaque failure deep in the log reader.
 	if q.Grep != "" {
 		if _, err := regexp.Compile(q.Grep); err != nil {
-			Fail(c, ValidationFailed("invalid grep pattern: %v", err).WithDetail(gin.H{
+			Fail(c, ValidationFailed("grep 正则表达式无效：%v", err).WithDetail(gin.H{
 				"issues": []ValidationIssue{{
 					Field:    "grep",
 					Code:     "invalid_regex",
@@ -70,7 +70,7 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 	switch q.Stream {
 	case "", "stdout", "stderr", "both":
 	default:
-		Fail(c, ValidationFailed("stream must be one of stdout, stderr, both"))
+		Fail(c, ValidationFailed("stream 必须是 stdout、stderr、both 之一"))
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *Server) handleListBackups(c *gin.Context) {
 	if v := c.Query("instance_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || id < 0 {
-			Fail(c, ValidationFailed("instance_id must be a non-negative integer"))
+			Fail(c, ValidationFailed("instance_id 必须为非负整数"))
 			return
 		}
 		filter.InstanceID = id
@@ -211,7 +211,7 @@ func (s *Server) handleCreateBackup(c *gin.Context) {
 	var req CreateBackupRequest
 	if c.Request.ContentLength > 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			Fail(c, BadRequest("invalid backup request: %v", err))
+			Fail(c, BadRequest("备份请求格式无效：%v", err))
 			return
 		}
 	}
@@ -223,7 +223,7 @@ func (s *Server) handleCreateBackup(c *gin.Context) {
 	switch kind {
 	case "manual", "scheduled", "pre-start":
 	default:
-		Fail(c, ValidationFailed("kind must be one of manual, scheduled, pre-start"))
+		Fail(c, ValidationFailed("kind 必须是 manual、scheduled、pre-start 之一"))
 		return
 	}
 
@@ -282,7 +282,7 @@ func (s *Server) handleRestoreBackup(c *gin.Context) {
 	}
 
 	if live, ok := s.deps.Process.State(inst.ID); ok && live.State == StateRunning {
-		Fail(c, Conflict("the instance is running; stop it before restoring a backup").
+		Fail(c, Conflict("实例正在运行；请先停止再恢复备份").
 			WithDetail(gin.H{"state": live.State, "instance_id": inst.ID}))
 		return
 	}

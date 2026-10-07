@@ -349,11 +349,11 @@ func compareVersions(a, b string) int {
 // dotnetInstallHint builds the operator-facing remediation text from §9.1.
 func dotnetInstallHint(templateDir string) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Install the .NET %d runtime, then restart the panel: ", RequiredDotnetMajor))
-	b.WriteString("https://learn.microsoft.com/dotnet/core/install/linux (or run the bundled dotnet-install.sh). ")
-	b.WriteString(fmt.Sprintf("Verify with `dotnet --list-runtimes`; it must list Microsoft.NETCore.App %d.x.", RequiredDotnetMajor))
+	b.WriteString(fmt.Sprintf("请安装 .NET %d 运行时，然后重启面板：", RequiredDotnetMajor))
+	b.WriteString("https://learn.microsoft.com/dotnet/core/install/linux（或运行随附的 dotnet-install.sh）。")
+	b.WriteString(fmt.Sprintf("可用 `dotnet --list-runtimes` 验证，其中必须列出 Microsoft.NETCore.App %d.x。", RequiredDotnetMajor))
 	if templateDir == "" {
-		b.WriteString(" The server template directory is not configured, so instances cannot be provisioned from a template yet (see §6.1).")
+		b.WriteString(" 尚未配置服务端模板目录，因此暂时无法从模板创建实例（参见 §6.1）。")
 	}
 	return b.String()
 }
@@ -362,7 +362,7 @@ func (s *HostSystemService) storageInfo() StorageInfo {
 	dir := s.InstancesDir
 	info := StorageInfo{Path: dir}
 	if dir == "" {
-		info.Error = "instances directory is not configured"
+		info.Error = "未配置实例目录"
 		return info
 	}
 
@@ -377,13 +377,13 @@ func (s *HostSystemService) storageInfo() StorageInfo {
 
 	// Writability is the fact that actually matters for creating instances.
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		info.Error = fmt.Sprintf("instances directory is not creatable: %v", err)
+		info.Error = fmt.Sprintf("实例目录不可创建：%v", err)
 		return info
 	}
 	f, err := os.CreateTemp(dir, ".scnetm-write-probe-*")
 	if err != nil {
 		if info.Error == "" {
-			info.Error = fmt.Sprintf("instances directory is not writable: %v", err)
+			info.Error = fmt.Sprintf("实例目录不可写：%v", err)
 		}
 		return info
 	}

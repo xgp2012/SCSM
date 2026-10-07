@@ -41,22 +41,22 @@ import (
 var (
 	// ErrNotFound is returned by any store lookup that matches no row.
 	// Handlers map it to HTTP 404.
-	ErrNotFound = errors.New("api: resource not found")
+	ErrNotFound = errors.New("资源不存在")
 	// ErrConflict is returned when a write violates a uniqueness or state
 	// constraint (duplicate instance name, duplicate username). Handlers map
 	// it to HTTP 409.
-	ErrConflict = errors.New("api: resource conflict")
+	ErrConflict = errors.New("资源冲突")
 	// ErrInvalid is returned when a store rejects a value as malformed.
 	// Handlers map it to HTTP 422.
-	ErrInvalid = errors.New("api: invalid value")
+	ErrInvalid = errors.New("取值无效")
 	// ErrNotImplemented is returned by the nop implementations that stand in
 	// for unavailable backends. Handlers map it to HTTP 501 and never treat it
 	// as "empty result".
-	ErrNotImplemented = errors.New("api: not implemented in this build")
+	ErrNotImplemented = errors.New("当前版本尚未实现")
 	// ErrUnavailable is returned when a backend exists but is temporarily
 	// unusable (e.g. the supervisor cannot reach the process). Handlers map it
 	// to HTTP 503.
-	ErrUnavailable = errors.New("api: dependency unavailable")
+	ErrUnavailable = errors.New("依赖服务不可用")
 )
 
 // ---------------------------------------------------------------------------

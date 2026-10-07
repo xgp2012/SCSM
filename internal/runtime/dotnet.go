@@ -474,12 +474,12 @@ func firstLine(s string) string {
 // It is a plain string (not an error) so the UI can render it in a code block
 // without unwrapping an error chain.
 func InstallHint() string {
-	return "No suitable .NET runtime was found. The server package targets " +
-		"net10.0 and requires the Microsoft.NETCore.App " + strconv.Itoa(DesiredMajor) +
-		".x runtime (the plain runtime, not the ASP.NET Core or Windows Desktop one).\n" +
-		"Install it with:\n" +
+	return "未找到合适的 .NET 运行时。服务端程序包目标框架为 net10.0，" +
+		"需要 Microsoft.NETCore.App " + strconv.Itoa(DesiredMajor) +
+		".x 运行时（是普通运行时，不是 ASP.NET Core，也不是 Windows Desktop）。\n" +
+		"安装命令：\n" +
 		"  curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel " +
 		strconv.Itoa(DesiredMajor) + ".0 --runtime dotnet\n" +
-		"Then either put dotnet on PATH, set DOTNET_ROOT, or point the panel's " +
-		"`dotnet_path` setting at it (default: ~/.dotnet/dotnet), and restart the panel."
+		"之后请将 dotnet 加入 PATH、设置 DOTNET_ROOT，或把面板的 " +
+		"`dotnet_path` 指向它（默认：~/.dotnet/dotnet），然后重启面板。"
 }

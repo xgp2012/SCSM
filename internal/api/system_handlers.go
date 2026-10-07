@@ -130,7 +130,7 @@ func int64Param(c *gin.Context, name, label string) (int64, *APIError) {
 	raw := c.Param(name)
 	v, err := parseInt64(raw)
 	if err != nil || v <= 0 {
-		return 0, ValidationFailed("%s must be a positive integer, got %q", label, raw)
+		return 0, ValidationFailed("%s 必须为正整数，实际为 %q", label, raw)
 	}
 	return v, nil
 }

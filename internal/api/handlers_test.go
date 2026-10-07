@@ -430,7 +430,7 @@ func TestActivateWorldRefusedWhileRunning(t *testing.T) {
 	requireErrorCode(t, resp, http.StatusConflict, CodeConflict)
 
 	// And it must say the instance has to be stopped.
-	if !strings.Contains(strings.ToLower(resp.ErrorMessage()), "stop") {
+	if !strings.Contains(resp.ErrorMessage(), "停止") {
 		t.Errorf("message does not tell the operator to stop the server: %q", resp.ErrorMessage())
 	}
 

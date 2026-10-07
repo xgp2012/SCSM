@@ -192,7 +192,7 @@ type ProcessManager interface {
 const CommandMaxBytes = 1024
 
 // ErrCommandRejected is returned by ValidateCommand for any rejected input.
-var ErrCommandRejected = errors.New("api: command rejected")
+var ErrCommandRejected = errors.New("指令被拒绝")
 
 // ValidateCommand applies the API layer's command-injection defenses.
 //

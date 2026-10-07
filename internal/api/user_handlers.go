@@ -45,7 +45,7 @@ func (s *Server) handleListUsers(c *gin.Context) {
 func (s *Server) handleCreateUser(c *gin.Context) {
 	var req CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid user request: %v", err))
+		Fail(c, BadRequest("用户请求格式无效：%v", err))
 		return
 	}
 
@@ -67,7 +67,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 
 	// Reject a duplicate explicitly so the message names the conflict.
 	if existing, gerr := s.deps.Users.GetByUsername(c.Request.Context(), username); gerr == nil && existing != nil {
-		Fail(c, Conflict("a user named %q already exists", username).WithDetail(gin.H{"user_id": existing.ID}))
+		Fail(c, Conflict("已存在名为 %q 的用户", username).WithDetail(gin.H{"user_id": existing.ID}))
 		return
 	} else if gerr != nil && !errors.Is(gerr, ErrNotFound) && !errors.Is(gerr, ErrNotImplemented) {
 		Fail(c, Classify(gerr, "could not check the username"))
@@ -84,7 +84,7 @@ func (s *Server) handleCreateUser(c *gin.Context) {
 	}
 	if err := s.deps.Users.Create(c.Request.Context(), user); err != nil {
 		if errors.Is(err, ErrConflict) {
-			Fail(c, Conflict("a user named %q already exists", username))
+			Fail(c, Conflict("已存在名为 %q 的用户", username))
 			return
 		}
 		Fail(c, Classify(err, "could not create the user"))
@@ -119,7 +119,7 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 
 	var req UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid user request: %v", err))
+		Fail(c, BadRequest("用户请求格式无效：%v", err))
 		return
 	}
 
@@ -134,7 +134,7 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 		}
 		if clean != user.Username {
 			if existing, gerr := s.deps.Users.GetByUsername(c.Request.Context(), clean); gerr == nil && existing != nil && existing.ID != user.ID {
-				Fail(c, Conflict("a user named %q already exists", clean))
+				Fail(c, Conflict("已存在名为 %q 的用户", clean))
 				return
 			}
 			changes["username_from"] = user.Username
@@ -154,11 +154,11 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 		if user.Role == auth.RoleAdmin && role != auth.RoleAdmin {
 			count, cerr := s.deps.Users.Count(c.Request.Context())
 			if cerr == nil && count <= 1 {
-				Fail(c, Conflict("cannot change the role of the only user account"))
+				Fail(c, Conflict("无法修改唯一账号的角色"))
 				return
 			}
 			if admins, aerr := s.countAdmins(c.Request.Context()); aerr == nil && admins <= 1 {
-				Fail(c, Conflict("cannot demote the last administrator"))
+				Fail(c, Conflict("无法降级最后一名管理员"))
 				return
 			}
 		}
@@ -170,12 +170,12 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 	if req.Disabled != nil {
 		// Refusing to disable yourself prevents an accidental self-lockout.
 		if *req.Disabled && p.UserID == user.ID {
-			Fail(c, Conflict("you cannot disable your own account"))
+			Fail(c, Conflict("不能停用你自己的账号"))
 			return
 		}
 		if *req.Disabled && user.Role == auth.RoleAdmin {
 			if admins, aerr := s.countAdmins(c.Request.Context()); aerr == nil && admins <= 1 {
-				Fail(c, Conflict("cannot disable the last administrator"))
+				Fail(c, Conflict("无法停用最后一名管理员"))
 				return
 			}
 		}
@@ -204,7 +204,7 @@ func (s *Server) handleUpdateUser(c *gin.Context) {
 
 	if err := s.deps.Users.Update(c.Request.Context(), user); err != nil {
 		if errors.Is(err, ErrConflict) {
-			Fail(c, Conflict("that username is already taken"))
+			Fail(c, Conflict("该用户名已被占用"))
 			return
 		}
 		Fail(c, Classify(err, "could not update the user"))
@@ -228,7 +228,7 @@ func (s *Server) handleDeleteUser(c *gin.Context) {
 
 	p := MustPrincipal(c)
 	if p.UserID == id {
-		Fail(c, Conflict("you cannot delete your own account"))
+		Fail(c, Conflict("不能删除你自己的账号"))
 		return
 	}
 
@@ -240,7 +240,7 @@ func (s *Server) handleDeleteUser(c *gin.Context) {
 
 	if user.Role == auth.RoleAdmin {
 		if admins, aerr := s.countAdmins(c.Request.Context()); aerr == nil && admins <= 1 {
-			Fail(c, Conflict("cannot delete the last administrator"))
+			Fail(c, Conflict("无法删除最后一名管理员"))
 			return
 		}
 	}
@@ -329,7 +329,7 @@ func (s *Server) countAdmins(ctx context.Context) (int, error) {
 func (s *Server) handleListAudit(c *gin.Context) {
 	var q AuditQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
-		Fail(c, BadRequest("invalid audit query: %v", err))
+		Fail(c, BadRequest("审计查询参数格式无效：%v", err))
 		return
 	}
 
@@ -344,11 +344,11 @@ func (s *Server) handleListAudit(c *gin.Context) {
 		filter.Limit = 100
 	}
 	if filter.Limit > 1000 {
-		Fail(c, ValidationFailed("limit must be at most 1000"))
+		Fail(c, ValidationFailed("limit 不得超过 1000"))
 		return
 	}
 	if filter.Offset < 0 {
-		Fail(c, ValidationFailed("offset must not be negative"))
+		Fail(c, ValidationFailed("offset 不能为负数"))
 		return
 	}
 
@@ -365,7 +365,7 @@ func (s *Server) handleListAudit(c *gin.Context) {
 		}
 		t, err := parseTimeParam(spec.raw)
 		if err != nil {
-			Fail(c, ValidationFailed("%s must be an RFC3339 timestamp or a Unix epoch: %v", spec.field, err))
+			Fail(c, ValidationFailed("%s 必须是 RFC3339 时间戳或 Unix 时间戳：%v", spec.field, err))
 			return
 		}
 		*spec.dst = &t

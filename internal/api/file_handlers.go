@@ -70,11 +70,11 @@ func (s *Server) handleListFiles(c *gin.Context) {
 
 	st, err := os.Stat(abs)
 	if err != nil {
-		Fail(c, Classify(err, "path not found"))
+		Fail(c, Classify(err, "路径不存在"))
 		return
 	}
 	if !st.IsDir() {
-		Fail(c, ValidationFailed("%q is a file, not a directory", rel))
+		Fail(c, ValidationFailed("%q 是文件，不是目录", rel))
 		return
 	}
 
@@ -114,7 +114,7 @@ func (s *Server) handleDownloadFile(c *gin.Context) {
 
 	rel := c.Query("path")
 	if rel == "" {
-		Fail(c, BadRequest("the \"path\" query parameter is required"))
+		Fail(c, BadRequest("必须提供 \"path\" 查询参数"))
 		return
 	}
 
@@ -125,17 +125,17 @@ func (s *Server) handleDownloadFile(c *gin.Context) {
 
 	st, err := os.Stat(abs)
 	if err != nil {
-		Fail(c, Classify(err, "file not found"))
+		Fail(c, Classify(err, "文件不存在"))
 		return
 	}
 	if st.IsDir() {
-		Fail(c, ValidationFailed("%q is a directory; zip it first or list it instead", rel))
+		Fail(c, ValidationFailed("%q 是目录；请先打包为 zip，或改用列表接口", rel))
 		return
 	}
 
 	f, err := os.Open(abs)
 	if err != nil {
-		Fail(c, Classify(err, "file not found"))
+		Fail(c, Classify(err, "文件不存在"))
 		return
 	}
 	defer f.Close()
@@ -182,19 +182,19 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 	}
 	st, err := os.Stat(absDir)
 	if err != nil || !st.IsDir() {
-		Fail(c, ValidationFailed("upload destination %q is not a directory", destDir))
+		Fail(c, ValidationFailed("上传目标 %q 不是目录", destDir))
 		return
 	}
 
 	fh, err := c.FormFile("file")
 	if err != nil {
-		Fail(c, BadRequest("a multipart file field named \"file\" is required: %v", err))
+		Fail(c, BadRequest("必须提供名为 \"file\" 的 multipart 字段：%v", err))
 		return
 	}
 
 	maxBytes := s.deps.ConfigHTTP.MaxUploadBytes
 	if fh.Size > maxBytes {
-		Fail(c, PayloadTooLarge("the file is %s, which exceeds the %s limit", humanSize(fh.Size), humanSize(maxBytes)))
+		Fail(c, PayloadTooLarge("文件大小 %s 超过 %s 的上限", humanSize(fh.Size), humanSize(maxBytes)))
 		return
 	}
 
@@ -202,7 +202,7 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 	// the base name and re-validate through ResolveInside.
 	safeName := filepath.Base(filepath.FromSlash(fh.Filename))
 	if safeName == "." || safeName == ".." || safeName == "/" || safeName == "" {
-		Fail(c, ValidationFailed("the uploaded file has no usable name"))
+		Fail(c, ValidationFailed("上传的文件没有可用的文件名"))
 		return
 	}
 	rel := safeName
@@ -220,7 +220,7 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 	ext := strings.ToLower(filepath.Ext(safeName))
 	warnings := []string{}
 	if !uploadAllowlist[ext] {
-		Fail(c, ValidationFailed("the extension %q is not allowed; permitted types are %s",
+		Fail(c, ValidationFailed("不允许扩展名 %q；允许的类型为 %s",
 			ext, allowlistString()).WithDetail(gin.H{
 			"issues": []ValidationIssue{{
 				Field:    "file",
@@ -235,7 +235,7 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 
 	src, err := fh.Open()
 	if err != nil {
-		Fail(c, BadRequest("could not read the upload: %v", err))
+		Fail(c, BadRequest("无法读取上传内容：%v", err))
 		return
 	}
 	defer src.Close()
@@ -289,7 +289,7 @@ func (s *Server) handleMkdir(c *gin.Context) {
 
 	var req FileMkdirRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid mkdir request: %v", err))
+		Fail(c, BadRequest("新建目录请求格式无效：%v", err))
 		return
 	}
 
@@ -302,7 +302,7 @@ func (s *Server) handleMkdir(c *gin.Context) {
 	if req.Mode != "" {
 		var parsed uint32
 		if _, err := fmt.Sscanf(req.Mode, "%o", &parsed); err != nil || parsed > 0o777 {
-			Fail(c, ValidationFailed("mode must be an octal permission string such as \"0755\""))
+			Fail(c, ValidationFailed("mode 必须形如 \"0755\" 的八进制权限字符串"))
 			return
 		}
 		perm = os.FileMode(parsed)
@@ -333,7 +333,7 @@ func (s *Server) handleRenameFile(c *gin.Context) {
 
 	var req FileRenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid rename request: %v", err))
+		Fail(c, BadRequest("重命名请求格式无效：%v", err))
 		return
 	}
 
@@ -371,7 +371,7 @@ func (s *Server) handleDeleteFile(c *gin.Context) {
 
 	var req FileDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid delete request: %v", err))
+		Fail(c, BadRequest("删除请求格式无效：%v", err))
 		return
 	}
 
@@ -384,7 +384,7 @@ func (s *Server) handleDeleteFile(c *gin.Context) {
 	// permits the path "" (which resolves to the root).
 	rootAbs, _ := filepath.Abs(inst.Dir)
 	if filepath.Clean(abs) == filepath.Clean(rootAbs) {
-		Fail(c, Forbidden("refusing to delete the instance root directory"))
+		Fail(c, Forbidden("拒绝删除实例根目录"))
 		return
 	}
 
@@ -392,7 +392,7 @@ func (s *Server) handleDeleteFile(c *gin.Context) {
 	if err == nil && st.IsDir() && !req.Recursive {
 		entries, _ := os.ReadDir(abs)
 		if len(entries) > 0 {
-			Fail(c, Conflict("the directory is not empty; set \"recursive\": true to remove it with its contents").
+			Fail(c, Conflict("目录非空；如需连同内容一并删除，请设置 \"recursive\": true").
 				WithDetail(gin.H{"path": req.Path, "entries": len(entries)}))
 			return
 		}
@@ -423,7 +423,7 @@ func (s *Server) handleUnzipFile(c *gin.Context) {
 
 	var req FileUnzipRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, BadRequest("invalid unzip request: %v", err))
+		Fail(c, BadRequest("解压请求格式无效：%v", err))
 		return
 	}
 
@@ -432,7 +432,7 @@ func (s *Server) handleUnzipFile(c *gin.Context) {
 		return
 	}
 	if !strings.EqualFold(filepath.Ext(abs), ".zip") {
-		Fail(c, ValidationFailed("only .zip archives can be extracted"))
+		Fail(c, ValidationFailed("仅支持解压 .zip 归档"))
 		return
 	}
 
@@ -490,7 +490,7 @@ func (s *Server) resolveInstancePath(c *gin.Context, inst *Instance, rel string,
 				"reason": err.Error(),
 				"ip":     ClientIP(c),
 			})
-			apiErr := Forbidden("path rejected: %v", err).WithDetail(gin.H{
+			apiErr := Forbidden("路径被拒绝：%v", err).WithDetail(gin.H{
 				"path":   rel,
 				"reason": classifyPathError(err),
 			})
@@ -503,7 +503,7 @@ func (s *Server) resolveInstancePath(c *gin.Context, inst *Instance, rel string,
 			return "", apiErr
 		}
 		if errors.Is(err, ErrPathEmpty) {
-			apiErr := ValidationFailed("a path is required")
+			apiErr := ValidationFailed("必须提供 path 参数")
 			Fail(c, apiErr)
 			return "", apiErr
 		}
@@ -545,10 +545,10 @@ func (s *Server) failFiles(c *gin.Context, err error, inst *Instance, op, rel st
 		s.audit(c, "file.path_rejected", fmt.Sprintf("instance:%d", inst.ID), gin.H{
 			"path": rel, "operation": op, "reason": err.Error(),
 		})
-		Fail(c, Forbidden("path rejected: %v", err).WithDetail(gin.H{"path": rel, "reason": classifyPathError(err)}))
+		Fail(c, Forbidden("路径被拒绝：%v", err).WithDetail(gin.H{"path": rel, "reason": classifyPathError(err)}))
 		return
 	}
-	Fail(c, Classify(err, fmt.Sprintf("could not %s %q", op, rel)))
+	Fail(c, Classify(err, fmt.Sprintf("无法对 %q 执行 %s", rel, op)))
 }
 
 // allowlist returns the sorted upload extension allowlist.
@@ -574,7 +574,7 @@ func readAllLimited(r io.Reader, maxBytes int64) ([]byte, error) {
 		return nil, Internal(fmt.Errorf("reading request body: %w", err))
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, PayloadTooLarge("the payload exceeds the %s limit", humanSize(maxBytes))
+		return nil, PayloadTooLarge("请求体大小超过 %s 的上限", humanSize(maxBytes))
 	}
 	return data, nil
 }

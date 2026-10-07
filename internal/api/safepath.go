@@ -23,19 +23,19 @@ import (
 // rather than a missing file, and operators want it visible in logs.
 var (
 	// ErrPathTraversal is the umbrella error for any rejected path.
-	ErrPathTraversal = errors.New("api: path escapes the instance directory")
+	ErrPathTraversal = errors.New("路径逃逸出实例目录")
 	// ErrPathEmpty is returned for an empty path.
-	ErrPathEmpty = errors.New("api: path must not be empty")
+	ErrPathEmpty = errors.New("路径不能为空")
 	// ErrPathNUL is returned when the path contains a NUL byte.
-	ErrPathNUL = errors.New("api: path must not contain NUL bytes")
+	ErrPathNUL = errors.New("路径不能包含 NUL 字节")
 	// ErrPathAbsolute is returned for an absolute path.
-	ErrPathAbsolute = errors.New("api: absolute paths are not allowed")
+	ErrPathAbsolute = errors.New("不允许使用绝对路径")
 	// ErrPathSymlinkEscape is returned when resolving symlinks lands outside
 	// the root.
-	ErrPathSymlinkEscape = errors.New("api: symlink resolves outside the instance directory")
+	ErrPathSymlinkEscape = errors.New("符号链接指向实例目录之外")
 	// ErrPathNotExist is returned when the target does not exist and the caller
 	// required existence.
-	ErrPathNotExist = errors.New("api: path does not exist")
+	ErrPathNotExist = errors.New("路径不存在")
 )
 
 // ResolveInside resolves a client-supplied relative path against root and
