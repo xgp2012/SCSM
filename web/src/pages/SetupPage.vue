@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { KeyRound, ShieldCheck } from 'lucide-vue-next'
 import { UiAlert, UiButton, UiCard, UiInput, Message } from '@/components/ui'
 import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/api/client'
+import { endpoints } from '@/api/endpoints'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -14,6 +15,23 @@ const password = ref('')
 const confirm = ref('')
 const error = ref<string | null>(null)
 const submitting = ref(false)
+/**
+ * Server policy (auth.MinPasswordLength), fetched rather than hardcoded. It is
+ * 6 today because the seeded default admin password is 6 characters; a client
+ * that assumed 8 would reject a password the server accepts.
+ */
+const minLength = ref(6)
+
+onMounted(async () => {
+  try {
+    const status = await endpoints.setupStatus()
+    // The seeded admin's real name, so the form cannot silently rename it.
+    if (status?.username) username.value = status.username
+    if (status?.min_password_length) minLength.value = status.min_password_length
+  } catch {
+    // Keep the defaults; the server re-validates on submit regardless.
+  }
+})
 
 const strength = computed(() => {
   const value = password.value
@@ -42,7 +60,9 @@ const strengthTone = computed(() => {
 
 function validate(): string | null {
   if (!username.value.trim()) return '用户名不能为空'
-  if (password.value.length < 8) return '密码至少 8 位（计划 §5.7 要求避免弱默认密码）'
+  if (password.value.length < minLength.value) {
+    return `密码至少 ${minLength.value} 位`
+  }
   if (password.value !== confirm.value) return '两次输入的密码不一致'
   return null
 }
@@ -88,7 +108,7 @@ async function submit(): Promise<void> {
           <label class="mb-1 block text-xs text-zinc-500">管理员密码</label>
           <div class="relative">
             <KeyRound class="pointer-events-none absolute left-2.5 top-2.5 size-4 text-zinc-500" />
-            <UiInput v-model="password" class="pl-8" type="password" placeholder="至少 8 位" />
+            <UiInput v-model="password" class="pl-8" type="password" :placeholder="`至少 ${minLength} 位`" />
           </div>
           <div class="mt-1 flex items-center justify-between text-[11px]">
             <span class="text-zinc-600">强度</span>

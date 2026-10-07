@@ -73,10 +73,16 @@ export interface LoginResponse {
   user: User
 }
 
+/** Mirrors api.SetupStatusResponse (GET /api/v1/auth/setup-required). */
 export interface SetupStatus {
-  /** false → first run, /setup must be used to create the admin password. */
-  initialized: boolean
-  panel_version?: string
+  /** true → first run, /setup must be used to create the admin password. */
+  setup_required: boolean
+  /** Why setup is required, for the login screen to explain itself. */
+  reason?: string
+  /** The account that will receive the password (normally "admin"). */
+  username?: string
+  /** Server-side minimum password length, so the client can agree with it. */
+  min_password_length: number
 }
 
 export interface SetupRequest {

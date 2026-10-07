@@ -30,9 +30,12 @@ import type {
 /** The complete `/api/v1` surface from plan §5.6, in one place. */
 export const endpoints = {
   /* ---------------- auth ---------------- */
-  setupStatus: () => api.get<SetupStatus>('/setup/status', { redirectOn401: false }),
+  // Both first-run routes live under /auth on the server (router.go
+  // registerRoutes) and are unauthenticated by design: the login screen calls
+  // setupStatus before anyone can log in.
+  setupStatus: () => api.get<SetupStatus>('/auth/setup-required', { redirectOn401: false }),
   setup: (body: SetupRequest) =>
-    request<LoginResponse>('/setup', { method: 'POST', body, redirectOn401: false }),
+    request<LoginResponse>('/auth/setup', { method: 'POST', body, redirectOn401: false }),
   login: (body: LoginRequest) =>
     request<LoginResponse>('/auth/login', { method: 'POST', body, redirectOn401: false }),
   logout: () => api.post<ActionResult>('/auth/logout'),

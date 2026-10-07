@@ -40,12 +40,13 @@ onMounted(async () => {
   // First run: no admin password exists yet → force the /setup flow.
   try {
     const status = await endpoints.setupStatus()
-    if (status && status.initialized === false) {
+    if (status?.setup_required === true) {
       await router.replace({ name: 'setup' })
       return
     }
   } catch {
-    // A panel that does not expose /setup/status is assumed to be initialized.
+    // A panel whose first-run probe fails is assumed to be initialized; the
+    // login attempt will surface the real error.
   } finally {
     checkingSetup.value = false
   }
