@@ -6,6 +6,15 @@ console to the browser, and edits their configuration.
 
 Plan of record: [`SCNETM-开服面板实现计划.md`](../SCNETM-开服面板实现计划.md).
 
+Companion documents:
+
+| Document | What it is for |
+|---|---|
+| [`DEVELOPMENT.md`](./DEVELOPMENT.md) | contributor guide: package map, the traps, dev workflow, conventions |
+| [`API.md`](./API.md) | `/api/v1` contract, error codes, WebSocket protocol |
+| [`验证报告.md`](./验证报告.md) | V0-1…V0-7 verification results, graded A/B/C/D |
+| [`环境与可运行性验证.md`](./环境与可运行性验证.md) | environment ground truth and its evidence |
+
 > **Current status: initial implementation complete and running.**
 > All packages build, vet and test green; the panel boots, migrates its database,
 > serves `/healthz`, serves the embedded frontend, and mounts the full REST +

@@ -68,7 +68,7 @@ type LoginResponse struct {
 // SetupRequest is the body of POST /auth/setup (first-run bootstrap).
 type SetupRequest struct {
 	// Password is the administrator password to set. It must satisfy the
-	// panel policy (>= 8 chars, not in the common list).
+	// panel policy (>= auth.MinPasswordLength chars, not in the common list).
 	Password string `json:"password" binding:"required"`
 	// ConfirmPassword, when supplied, must equal Password. It exists so a
 	// typo cannot lock the operator out of a fresh panel.
