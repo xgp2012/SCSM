@@ -133,12 +133,22 @@ gofmt -l .          # must print nothing
 ## Releases
 
 Publishing is automated by [`.github/workflows/go-build.yml`](../.github/workflows/go-build.yml).
-Pushing a `v*` tag builds the binary, tests it, and creates a GitHub release:
 
-```bash
-git tag -a v0.2.0 -m "SCNETM v0.2.0"
-git push origin v0.2.0
-```
+**You do not create tags by hand. Pushing to `main` is enough.** The workflow
+runs three jobs:
+
+| Job | Runs when | Does |
+|---|---|---|
+| `verify` | every push and PR | `gofmt`, `go vet`, `go test` |
+| `release` | push to `main`, after `verify` is green | computes the next patch version, creates and pushes the tag |
+| `build` | after the above | checks out that tag, builds, publishes the release |
+
+The next version is the highest existing `v*` tag with its patch incremented:
+`v0.2.0` → `v0.2.1`. **A commit that fails verification produces no tag and no
+release**, so the tag is never ahead of the tests.
+
+To publish without cutting a new version, use *Run workflow* with
+`skip_release`.
 
 Each release carries three assets:
 
@@ -159,12 +169,24 @@ sha256sum -c SHA256SUMS
 ### Things that will bite you
 
 * **`permissions: contents: write` is required on the release job.** With the
-  default `contents: read` the build goes green and only the release step fails,
-  with `Resource not accessible by integration`. The workflow sets `read` at the
-  top level and elevates inside the job.
-* **The tag must match the version compiled into the binary.** `VERSION` comes
-  from `GITHUB_REF_NAME`, so on a tag push it is the tag name; a step asserts
-  `--version` reports exactly that string, and fails the release otherwise.
+  default `contents: read` the build goes green and only the tag push or release
+  step fails, with `Resource not accessible by integration`. The workflow sets
+  `read` at the top level and elevates inside the two jobs that need it.
+* **The tag must exist before the build, not after.** `VERSION` comes from
+  `GITHUB_REF_NAME`, and a step asserts `--version` reports exactly that string.
+  On a push to `main` that variable is `main`, so building first and tagging
+  afterwards would compile the literal string `main` into the binary and fail the
+  assertion on every run. `release` therefore creates the tag and `build` checks
+  it out. For the same reason the release step passes `tag_name` explicitly —
+  action-gh-release defaults it to `github.ref_name`, which on `main` would
+  attach the release to the branch and produce no release under the version tag.
+* **The release job must not run concurrently with itself.** Versions are
+  computed from the highest existing tag, so two runs starting together both read
+  the same "latest" and both believe the next version is free. The `concurrency`
+  group serialises them; combined with the "HEAD is already tagged" check, the
+  second run exits cleanly instead of creating `v0.2.1` and `v0.2.2` against one
+  commit. `cancel-in-progress` is `false` deliberately — cancelling mid-run could
+  leave a tag pushed with no release attached.
 * **A bare `go build` must never be used for a release.** It succeeds with exit
   code 0 while embedding a placeholder page. The workflow's "Verify frontend is
   embedded" step starts the binary and asserts `/` serves the real UI, because

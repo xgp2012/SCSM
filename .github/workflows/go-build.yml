@@ -1,9 +1,21 @@
 name: Go Build & Release
 
-# Builds the SCNETM panel as a self-contained Linux x86-64 binary, and publishes
-# it as a GitHub release when a v* tag is pushed.
+# Builds the SCNETM panel as a self-contained Linux x86-64 binary and publishes
+# it as a GitHub release.
 #
-# Four things about this project make the ordering below load-bearing:
+# # How a release is produced
+#
+# You do not create tags by hand. Pushing to main is enough:
+#
+#   1. `verify`   — fmt, vet, test. Nothing else starts until this is green.
+#   2. `release`  — computes the next patch version from the highest existing
+#                   v* tag, creates that tag, and pushes it.
+#   3. `build`    — checks out the tag the release job just made, builds, and
+#                   creates the release from it.
+#
+# A commit that fails verification produces no tag and no release.
+#
+# # Five things about this project make the ordering below load-bearing
 #
 #   1. The frontend must be built and copied into internal/webui/dist BEFORE
 #      `go build` runs. go:embed cannot reference ../../web/dist, so the binary
@@ -19,27 +31,58 @@ name: Go Build & Release
 #      repository has no PRs and a linear history, so it emits a single
 #      "Full Changelog" line and nothing else. Measured on the v0.2.0 release:
 #      66 bytes of body. RELEASE_NOTES.md is generated below instead.
-#   4. The tag must match the version compiled into the binary. VERSION is fed
-#      from GITHUB_REF_NAME, and a step asserts --version reports exactly that
-#      string. A mismatch would ship a v0.2.0 release whose binary says
-#      something else.
+#   4. The tag must match the version compiled into the binary. VERSION comes
+#      from GITHUB_REF_NAME and a step asserts --version reports exactly that
+#      string, so a v0.3.0 release can never ship a binary that says something
+#      else.
+#
+#      THIS IS WHY THE TAG MUST EXIST BEFORE THE BUILD. On a branch push
+#      GITHUB_REF_NAME is "main", so building first and tagging afterwards would
+#      compile the literal string "main" into the binary and then fail the
+#      assertion on every run. The `release` job therefore creates the tag and
+#      `build` checks that tag out, so GITHUB_REF_NAME is the version.
+#   5. Auto-tagging and the checkout are both pinned to the workflow's own
+#      commit (github.sha), never to the moving `main` ref: several pushes can
+#      be in flight at once, and checking out `main` would silently build
+#      someone else's newer commit under this run's tag.
+#   6. THE RELEASE JOB MUST NOT RUN CONCURRENTLY WITH ITSELF. Version numbers
+#      are computed from the highest existing tag, so two runs starting together
+#      both read the same "latest" and both believe the next version is free.
+#      The "HEAD is already tagged" check does not save you: it reads before it
+#      writes, so both runs pass the check and then create v0.2.1 AND v0.2.2
+#      against the same commit — two releases for one change, and a version
+#      number burned. The concurrency group below serialises them; combined with
+#      that check, the second run finds HEAD already tagged and exits cleanly.
+#
+#      cancel-in-progress is false on purpose: cancelling a run midway through
+#      could leave a tag pushed with no release attached to it.
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   push:
-    # Full build + artifact upload is limited to main and tags. Feature branches
-    # still run the verify/test job, but do not upload 16 MB artifacts apiece.
+    # Releases are produced from main only. Feature branches still run `verify`
+    # so a regression is caught before it reaches main, but they neither tag nor
+    # upload artifacts.
     branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      skip_release:
+        description: 'Build without creating a new tag or release'
+        type: boolean
+        default: false
 
-# Workflow-level permissions are deliberately the least privilege needed for a
-# build. The release job raises its own to contents:write, because creating a
-# release (and uploading assets to it) needs write access that a build must not
-# have. Declaring contents:read for the whole workflow and then calling
-# action-gh-release without elevating is a silent trap: the build goes green and
-# only the release step fails with "Resource not accessible by integration".
+# Workflow-level permissions are the least privilege a build needs. The release
+# job raises its own to contents:write, because creating a tag and a release
+# needs write access that a build must not have. Declaring contents:read for the
+# whole workflow and then pushing a tag without elevating is a silent trap: the
+# build goes green and only the tag step fails with "Resource not accessible by
+# integration".
 permissions:
   contents: read
 
@@ -83,15 +126,126 @@ jobs:
       - name: go test
         run: go test ./...
 
+  # ---- Create the version tag ----------------------------------------------
+  # Only runs on a push to main, and only after verify is green, so a commit
+  # that fails fmt/vet/test produces no tag and no release.
+  #
+  # The next version is the highest existing v* tag with its patch component
+  # incremented: v0.2.0 -> v0.2.1. Version sorting is done by `sort -V` rather
+  # than lexically, because v0.10.0 must sort above v0.9.0.
+  release:
+    name: Tag version
+    runs-on: ubuntu-latest
+    needs: [verify]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && inputs.skip_release != true
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      created: ${{ steps.tag.outputs.created }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # All tags are needed to compute the next version, so a shallow clone
+          # is not enough.
+          fetch-depth: 0
+
+      - name: Compute and push the next tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          # --- find the highest existing version tag ---
+          latest="$(git tag -l 'v*' | sort -V | tail -1)"
+          if [ -z "$latest" ]; then
+            next="v0.1.0"
+            echo "No existing tags; starting at ${next}"
+          else
+            echo "Latest tag: ${latest}"
+            # Split on dots. The leading v is stripped from the major component.
+            # A non-numeric component means a hand-made tag (e.g. v0.1.0-rc1)
+            # got picked up; fail loudly rather than computing nonsense.
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
+              echo "::error::cannot parse ${latest} as vMAJOR.MINOR.PATCH"
+              exit 1
+            fi
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+
+          # --- re-read the remote before deciding ---
+          # The version above was computed from the tags present at checkout
+          # time. The concurrency group means a second run should not be here at
+          # all, but a tag pushed by a human (or by a run that started before
+          # this one acquired the lock) would otherwise be invisible and the
+          # computation would be based on stale data. Fetching tags by
+          # --prune-tags keeps this decision on current remote state.
+          git fetch --tags --force --prune-tags origin >/dev/null 2>&1 || true
+
+          # Recompute against what the remote actually has now.
+          latest_remote="$(git tag -l 'v*' | sort -V | tail -1)"
+          if [ -n "$latest_remote" ] && [ "$latest_remote" != "$latest" ]; then
+            echo "Remote is ahead of the checkout: latest is now ${latest_remote} (was ${latest})"
+            IFS='.' read -r major minor patch <<< "${latest_remote#v}"
+            if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
+              echo "::error::cannot parse ${latest_remote} as vMAJOR.MINOR.PATCH"
+              exit 1
+            fi
+            next="v${major}.${minor}.$((patch + 1))"
+            echo "Recomputed next version: ${next}"
+          fi
+
+          # --- is this commit already tagged? ---
+          # Several pushes can be in flight, and a re-run is possible. If HEAD
+          # is already carrying a version tag there is nothing to do; treating
+          # that as success (rather than an error) keeps a re-run idempotent.
+          # This is also what makes the serialised second run a no-op rather
+          # than a duplicate release.
+          head_sha="$(git rev-parse HEAD)"
+          existing="$(git tag --points-at "$head_sha" | grep -E '^v[0-9]' || true)"
+          if [ -n "$existing" ]; then
+            tag="$(printf '%s\n' "$existing" | sort -V | tail -1)"
+            echo "HEAD is already tagged ${tag}; reusing it."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --- refuse to move an existing tag ---
+          # Tags are immutable releases. If the computed name already exists,
+          # something is out of order (a concurrent run, most likely) and
+          # silently overwriting would rewrite published history.
+          if git rev-parse -q --verify "refs/tags/${next}" >/dev/null; then
+            echo "::error::tag ${next} already exists but does not point at HEAD; refusing to move it"
+            exit 1
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${next}" -m "SCNETM ${next}" "$head_sha"
+
+          # Push the tag alone, by name, so nothing else can be moved by this
+          # command. The token comes from the checkout's persisted credentials.
+          git push origin "refs/tags/${next}"
+
+          echo "Created and pushed ${next} at ${head_sha}"
+          echo "tag=${next}" >> "$GITHUB_OUTPUT"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
   # ---- Assemble the release binary -----------------------------------------
   build:
     name: Build linux/amd64
     runs-on: ubuntu-latest
-    needs: [verify]
-    # Elevated from the workflow-level contents:read so that the release step can
-    # create a release and upload assets when this run was triggered by a v* tag.
-    # A build triggered by a branch push or pull request never reaches that step,
-    # so the extra scope is unused there.
+    needs: [verify, release]
+    # `release` is skipped on PRs, branch pushes and workflow_dispatch with
+    # skip_release, so this must tolerate it being skipped. Without
+    # always(), a skipped dependency would skip the build too, and a PR would
+    # never get its compile check.
+    if: always() && needs.verify.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    # Elevated from the workflow-level contents:read so the release step can
+    # create a release and upload assets.
     permissions:
       contents: write
 
@@ -102,6 +256,14 @@ jobs:
           # internal/version reads vcs.revision via debug.ReadBuildInfo, so the
           # binary wants a real git history to report an accurate commit.
           fetch-depth: 0
+          # When the release job made a tag, build THAT tag. Otherwise
+          # GITHUB_REF_NAME is "main" and the version assertion below would
+          # compare "main" against the tag and fail on every run.
+          #
+          # github.sha (not `main`) pins this to the commit this run was
+          # triggered by, so a concurrent push cannot make this run tag one
+          # commit and build another.
+          ref: ${{ needs.release.outputs.tag || github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -127,8 +289,13 @@ jobs:
       # Race detection is the expensive check, so it runs only when a release is
       # actually being cut. supervisor and ansi are the concurrency-heavy
       # packages; a data race there corrupts the console stream under load.
+      #
+      # Keyed off the release job rather than github.ref: after this change a
+      # release is cut by a push to main, where github.ref is not a tag ref.
+      # A tag push (the manual escape hatch) sets neither output, so it is
+      # covered by the second clause.
       - name: go test -race (release gate)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.release.outputs.created == 'true' || startsWith(github.ref, 'refs/tags/v')
         run: go test -race ./...
 
       # ---- Frontend ----------------------------------------------------------
@@ -145,10 +312,20 @@ jobs:
       # ---- Assemble the binary ----------------------------------------------
       # `make build` performs the web/dist -> internal/webui/dist copy and then
       # compiles with CGO_ENABLED=0 and the version ldflags.
+      #
+      # VERSION is taken from the tag the release job produced when there is
+      # one, and falls back to GITHUB_REF_NAME (a v* tag push, or any ref for a
+      # non-release build) otherwise. This must agree with the assertion below.
       - name: Build binary
         run: |
+          set -euo pipefail
+          version="${{ needs.release.outputs.tag }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+          echo "Building version: ${version}"
           make build \
-            VERSION="${GITHUB_REF_NAME}" \
+            VERSION="${version}" \
             COMMIT="${GITHUB_SHA}" \
             BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -192,16 +369,20 @@ jobs:
           ls -lh build/scnetm
           ./build/scnetm --version
 
-      - name: Verify tagged release version matches the binary
-        # On a v* tag push the release is published under that tag, so the
-        # version compiled into the binary must be the same string.
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Verify the release version matches the binary
+        # The version compiled into the binary must equal the tag the release is
+        # published under. Keyed off the release job's output rather than
+        # github.ref: on a push to main this run is a branch build that the
+        # release job turned into a tag, and github.ref still says main here in
+        # the workflow_dispatch and PR cases.
+        if: needs.release.outputs.created == 'true'
         run: |
           set -euo pipefail
+          tag="${{ needs.release.outputs.tag }}"
           built="$(./build/scnetm --version | head -1 | awk '{print $2}')"
-          echo "tag=${GITHUB_REF_NAME} binary=${built}"
-          if [ "$built" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::binary reports version '$built' but the tag is '${GITHUB_REF_NAME}'"
+          echo "tag=${tag} binary=${built}"
+          if [ "$built" != "${tag}" ]; then
+            echo "::error::binary reports version '${built}' but the tag is '${tag}'"
             exit 1
           fi
           echo "Release version matches the tag."
@@ -287,10 +468,14 @@ jobs:
       # deliberately blunt: docs/验证报告.md grades each conclusion A/B/C/D and
       # forbids promoting a B or C to A, so the release note echoes that.
       - name: Generate release notes
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.release.outputs.created == 'true' || startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME}"
+          version="${{ needs.release.outputs.tag }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+          echo "Writing notes for ${version}"
           short_sha="$(git rev-parse --short HEAD)"
           size="$(du -h dist/scnetm-linux-amd64 | cut -f1)"
           sha="$(awk '$2=="scnetm-linux-amd64"{print $1}' dist/SHA256SUMS)"
@@ -401,11 +586,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # ---- Release (tags only) ----------------------------------------------
+      # ---- Release -----------------------------------------------------------
+      # `tag_name` is passed EXPLICITLY and is load-bearing.
+      #
+      # action-gh-release defaults tag_name to github.ref_name. On a push to
+      # main that is "main", so the release would be attached to the branch and
+      # no release would appear under the version tag — the exact symptom of
+      # "the release never gets created" this workflow exists to prevent.
       - name: Create release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.release.outputs.created == 'true' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.release.outputs.tag || github.ref_name }}
+          name: ${{ needs.release.outputs.tag || github.ref_name }}
           files: |
             dist/scnetm-linux-amd64
             dist/scnetm-linux-amd64.tar.gz
