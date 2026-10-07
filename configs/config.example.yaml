@@ -8,9 +8,10 @@
 # Every key is optional: anything omitted falls back to the default shown in the
 # comment. Unknown keys are rejected at start-up, so typos fail loudly.
 
-# HTTP listen address. The default binds loopback only — put a TLS-terminating
-# reverse proxy in front of it before exposing the panel (plan §5.7).
-listen: "127.0.0.1:8080"
+# HTTP listen address. The default binds all interfaces (0.0.0.0) on port 7000,
+# i.e. it is reachable from the network — put a TLS-terminating reverse proxy in
+# front of it, or restrict this to 127.0.0.1, before exposing the panel (plan §5.7).
+listen: "0.0.0.0:7000"
 
 # Root directory for panel-owned data: the SQLite database, instance
 # directories and logs. Relative paths resolve against this file's directory.

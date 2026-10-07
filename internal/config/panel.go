@@ -29,7 +29,7 @@ import (
 
 // Defaults for [LoadPanel]. They mirror configs/config.example.yaml.
 const (
-	DefaultListen       = "127.0.0.1:8080"
+	DefaultListen       = "0.0.0.0:7000"
 	DefaultDataDir      = "./data"
 	DefaultTemplateDir  = "" // empty when unset
 	DefaultDotnetPath   = "dotnet"
