@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -743,4 +744,59 @@ func TestStopFlushesLogBeforeReturning(t *testing.T) {
 		b, err := os.ReadFile(filepath.Join(logDir, dayKey(time.Now())+logFilePlainSuffix))
 		return err == nil && strings.Contains(string(b), "最后一行没有换行符")
 	})
+}
+
+// TestPipeSurvivesWaitReaping pins the reason wirePipes builds its own os.Pipe
+// instead of calling cmd.StdoutPipe.
+//
+// (*exec.Cmd).Wait() closes every pipe StdoutPipe registered, and closing a pipe
+// read end discards anything the child wrote but nobody has read yet. The
+// stdlib says as much: "it is incorrect to call Wait before all reads from the
+// pipe have completed." The runner cannot avoid that ordering — waitLoop must
+// reap the child while readLoop drains the same descriptor — so it must not use
+// StdoutPipe at all.
+//
+// This test is deliberately deterministic rather than a timing race: it calls
+// Wait() BEFORE the first Read, so it fails on every run for a StdoutPipe-based
+// implementation (measured 100/100 for /bin/true, /bin/echo and /usr/bin/env)
+// while the owned-pipe implementation keeps the bytes. It reproduces the CI
+// symptom — an instantly-exiting child whose output never arrives — without
+// depending on the machine being slow enough to lose the scheduling race.
+func TestPipeSurvivesWaitReaping(t *testing.T) {
+	// echo needs no shell quoting and appends exactly one newline, so the
+	// expected bytes are unambiguous.
+	const payload = "tail-line-that-must-survive"
+	want := payload + "\n"
+
+	for i := 0; i < 20; i++ {
+		cmd := exec.Command("/bin/echo", payload)
+		_, stdout, stdoutWrite, err := wirePipes(cmd)
+		if err != nil {
+			t.Fatalf("wirePipes: %v", err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		// Exactly what Start does: the child holds its own descriptor now.
+		// A nil write end is what the old StdoutPipe path returned; tolerate it
+		// so this test reports the DATA LOSS rather than a nil dereference.
+		if stdoutWrite != nil {
+			if err := stdoutWrite.Close(); err != nil {
+				t.Fatalf("close parent write end: %v", err)
+			}
+		}
+		// Exactly what waitLoop does first, and the operation that used to
+		// destroy the buffered output.
+		if werr := cmd.Wait(); werr != nil {
+			t.Fatalf("Wait: %v", werr)
+		}
+		got, rerr := io.ReadAll(stdout)
+		_ = stdout.Close()
+		if rerr != nil {
+			t.Fatalf("iteration %d: read after Wait returned %d bytes, err=%v", i, len(got), rerr)
+		}
+		if string(got) != want {
+			t.Fatalf("iteration %d: output lost across Wait: got %q, want %q", i, got, want)
+		}
+	}
 }

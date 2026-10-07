@@ -217,6 +217,9 @@ func (r *Runner) Start(ctx context.Context) error {
 		ptmx       *os.File
 		method     termMethod
 		degradeMsg string
+		// stdoutWrite is the parent's copy of the pipe write end, kept only
+		// until the child has been forked (see wirePipes).
+		stdoutWrite *os.File
 	)
 
 	if r.opts.wantsPTY() {
@@ -230,7 +233,7 @@ func (r *Runner) Start(ctx context.Context) error {
 			cmd.Dir = r.opts.Dir
 			cmd.Env = r.buildEnv()
 			cmd.SysProcAttr = newSysProcAttr()
-			in, out, werr := wirePipes(cmd)
+			in, out, outWrite, werr := wirePipes(cmd)
 			if werr != nil {
 				_ = pipe.close()
 				r.sm.setFailure(werr.Error(), nil)
@@ -238,6 +241,7 @@ func (r *Runner) Start(ctx context.Context) error {
 				return &startError{Stage: "wire pipes", Err: werr}
 			}
 			stdin, stdout, method = in, out, methodPipe
+			stdoutWrite = outWrite
 			degradeMsg = fmt.Sprintf("PTY unavailable, falling back to pipes (no ANSI colours): %v", perr)
 		} else {
 			// In PTY mode the master is a single read/write endpoint: stdin,
@@ -248,7 +252,7 @@ func (r *Runner) Start(ctx context.Context) error {
 			method = methodPTY
 		}
 	} else {
-		in, out, werr := wirePipes(cmd)
+		in, out, outWrite, werr := wirePipes(cmd)
 		if werr != nil {
 			_ = pipe.close()
 			r.sm.setFailure(werr.Error(), nil)
@@ -256,9 +260,16 @@ func (r *Runner) Start(ctx context.Context) error {
 			return &startError{Stage: "wire pipes", Err: werr}
 		}
 		stdin, stdout, method = in, out, methodPipe
+		// Held across the fork and closed immediately after it: the child
+		// inherits its own copy of the write end, so the parent keeping this
+		// one open would prevent EOF and hang the reader.
+		stdoutWrite = outWrite
 	}
 
 	if err := cmd.Start(); err != nil {
+		if stdoutWrite != nil {
+			_ = stdoutWrite.Close()
+		}
 		_ = pipe.close()
 		if ptmx != nil {
 			_ = ptmx.Close()
@@ -266,6 +277,14 @@ func (r *Runner) Start(ctx context.Context) error {
 		r.sm.setFailure(err.Error(), nil)
 		r.fail(&startError{Stage: "exec " + r.opts.Executable, Err: err})
 		return &startError{Stage: "exec " + r.opts.Executable, Err: err}
+	}
+
+	// The child now holds its own descriptor: drop the parent's copy of the
+	// pipe write end so the reader sees EOF when the child exits. Doing this
+	// after Start (never before) is what keeps the parent from stealing the
+	// child's only handle on its own stdout.
+	if stdoutWrite != nil {
+		_ = stdoutWrite.Close()
 	}
 
 	r.mu.Lock()
@@ -452,26 +471,40 @@ func (r *Runner) waitLoop(cmd *exec.Cmd, waitCh chan struct{}, pipe *LogPipe, me
 	err := cmd.Wait()
 	code, sig := waitExitCode(err)
 
-	// The reader may still be draining; give it a bounded moment, then force
-	// the pipe closed so no lines are lost and no goroutine hangs.
+	// Drain before closing. The order matters and differs per method:
+	//
+	//   - PTY: the master must be closed for readLoop to observe end-of-file,
+	//     so close first, then wait (bounded) for the reader to finish.
+	//   - pipe: the read end belongs to us — wirePipes no longer uses
+	//     StdoutPipe, whose handle Wait() closed out from under the reader.
+	//     The reader therefore reaches EOF by itself once the child exits, and
+	//     closing the descriptor first would DISCARD whatever is still sitting
+	//     unread in the kernel pipe buffer. Wait for the drain, then close.
+	//
+	// Waiting here is what guarantees no tail line is lost: the reader owns the
+	// decoder and performs the final flush. It is bounded so a stuck reader
+	// (e.g. a grandchild still holding the terminal open) cannot hang the runner.
+	waitDrain := func() {
+		if readDone == nil {
+			return
+		}
+		select {
+		case <-readDone:
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if ptmx != nil {
 		_ = ptmx.Close()
+		waitDrain()
 	} else {
+		waitDrain()
 		r.mu.RLock()
 		out := r.stdout
 		r.mu.RUnlock()
 		if c, ok := out.(io.Closer); ok && out != nil {
+			// Force the (already drained) descriptor closed so no goroutine is
+			// left blocked if the bounded wait above expired.
 			_ = c.Close()
-		}
-	}
-	// Close the terminal above so readLoop sees EOF, then WAIT for it: the reader
-	// owns the decoder and performs the final flush, so waiting here is what
-	// guarantees no tail line is lost. It is bounded because the descriptor is
-	// already closed.
-	if readDone != nil {
-		select {
-		case <-readDone:
-		case <-time.After(5 * time.Second):
 		}
 	}
 	// Only the disk buffers remain for this goroutine to flush.
