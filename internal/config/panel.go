@@ -49,6 +49,19 @@ const (
 	ColorModeBasic    = "basic"
 )
 
+// Bounds mirrored from internal/auth's password policy.
+//
+// They are duplicated rather than imported to keep internal/config free of a
+// dependency on internal/auth; internal/api tests assert the two stay equal, so
+// the duplication cannot drift silently.
+const (
+	// MinAdminPasswordLength matches auth.MinPasswordLength.
+	MinAdminPasswordLength = 8
+	// MaxAdminPasswordLength matches auth.MaxPasswordLength (bcrypt's 72-byte
+	// input limit).
+	MaxAdminPasswordLength = 72
+)
+
 // AutoBackup configures the scheduled world backup job.
 type AutoBackup struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
@@ -77,6 +90,23 @@ type Panel struct {
 	Term         string   `yaml:"term" json:"term"`
 	ColorMode    string   `yaml:"color_mode" json:"color_mode"`
 	Defaults     Defaults `yaml:"defaults" json:"defaults"`
+
+	// DefaultAdminPassword, when set, is hashed and installed on the seeded
+	// administrator the first time the database is created, instead of leaving
+	// the account in the first-run "no password" state.
+	//
+	// Left empty (the default) the panel forces the operator through the setup
+	// screen, which is the safer behaviour: a fixed initial password on a panel
+	// that defaults to binding 0.0.0.0 is a published credential. Setting it is
+	// an explicit trade of that safety for unattended provisioning.
+	//
+	// It is honoured only while the admin still has no password, so it can never
+	// overwrite one that was set later — leaving it in config.yaml after the
+	// first start is harmless.
+	//
+	// Never serialised: the default JSON/YAML marshalling of Panel must not leak
+	// a password into a log line or an API response.
+	DefaultAdminPassword string `yaml:"default_admin_password" json:"-"`
 
 	// sourcePath records where this configuration was loaded from, for logging
 	// and diagnostics. It is never serialised.
@@ -323,6 +353,27 @@ func (p *Panel) Validate() error {
 		errs = append(errs, fmt.Errorf("defaults.auto_backup.keep: %d must not be negative", ab.Keep))
 	}
 
+	// The initial admin password is checked here rather than at seeding time so
+	// a too-short value fails at start-up, before the database is touched. The
+	// policy itself is enforced by internal/auth.HashPassword; this is only the
+	// clearly-wrong cases, because internal/config must not depend on
+	// internal/auth (that would invert the dependency direction).
+	if p.DefaultAdminPassword != "" {
+		// Whitespace is almost certainly a mis-quoted YAML value rather than an
+		// intentional password, and it would otherwise be silently accepted.
+		if strings.TrimSpace(p.DefaultAdminPassword) == "" {
+			errs = append(errs, errors.New("default_admin_password: must not be blank"))
+		} else if p.DefaultAdminPassword != strings.TrimSpace(p.DefaultAdminPassword) {
+			errs = append(errs, errors.New("default_admin_password: must not have leading or trailing whitespace"))
+		} else if len(p.DefaultAdminPassword) < MinAdminPasswordLength {
+			errs = append(errs, fmt.Errorf("default_admin_password: must be at least %d characters",
+				MinAdminPasswordLength))
+		} else if len(p.DefaultAdminPassword) > MaxAdminPasswordLength {
+			errs = append(errs, fmt.Errorf("default_admin_password: must be at most %d bytes (the bcrypt limit)",
+				MaxAdminPasswordLength))
+		}
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -463,13 +514,17 @@ func (p *Panel) EnsureDirs() (created []string, err error) {
 
 // Redacted returns a copy safe to write to logs.
 //
-// The panel configuration holds no secrets today (credentials live in SQLite),
-// so nothing is masked; the method exists so that any secret added later has an
-// obvious, single place to be redacted, and so log call sites already use the
-// safe accessor.
+// The only secret the panel configuration can hold is DefaultAdminPassword, so
+// it is blanked here. Everything else (paths, ports, the listen address) is
+// operational detail an operator needs in a log line to diagnose a bad start.
+//
+// Note that `json:"-"` on the field covers structured logging of a Panel, but a
+// plain %v or %+v of a Panel value would still print the password, so callers
+// that log a Panel should use this method rather than relying on the tag.
 func (p *Panel) Redacted() Panel {
 	c := *p
 	c.PortPool = append([]int(nil), p.PortPool...)
+	c.DefaultAdminPassword = ""
 	return c
 }
 
@@ -491,7 +546,19 @@ func (p *Panel) String() string {
 	fmt.Fprintf(&b, "  defaults.stop_timeout_sec: %d\n", p.Defaults.StopTimeoutSec)
 	fmt.Fprintf(&b, "  defaults.auto_backup: enabled=%t cron=%q keep=%d\n",
 		p.Defaults.AutoBackup.Enabled, p.Defaults.AutoBackup.Cron, p.Defaults.AutoBackup.Keep)
+	// Report only whether an initial password is configured. The value itself is
+	// never printed, on any path.
+	fmt.Fprintf(&b, "  default_admin_password: %s\n", setOrUnset(p.DefaultAdminPassword != ""))
 	return b.String()
+}
+
+// setOrUnset renders a boolean as "(set)" / "(unset)" for the config summary,
+// so a presence check reads unambiguously without ever showing the value.
+func setOrUnset(set bool) string {
+	if set {
+		return "(set)"
+	}
+	return "(unset)"
 }
 
 func orNone(s string) string {

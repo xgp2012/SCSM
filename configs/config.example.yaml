@@ -47,6 +47,23 @@ term: "xterm-256color"
 # basic    = degraded, uncoloured output (recorded per instance when PTY fails)
 color_mode: "enhanced"
 
+# Optional: the administrator's initial password, applied the first time the
+# database is created. Leave it unset (the default, and the recommended setting)
+# and the panel instead forces you through a one-time setup screen to choose a
+# password before it serves anything.
+#
+# Only set this for unattended provisioning, where nobody is watching the first
+# start. Two things make that a real trade-off:
+#   * the value sits in this file in plain text, and
+#   * the panel binds 0.0.0.0 by default, so a known initial password is
+#     reachable by anything that can reach the port.
+# Change it in the panel (账户 → 修改密码) as soon as you log in.
+#
+# It is applied only while the admin account still has no password, so leaving
+# the line here after the first start is harmless — it can never overwrite a
+# password you set later. Minimum 8 characters; must be quoted.
+# default_admin_password: "adfmin2026"
+
 defaults:
   # How long a graceful stop waits before escalating to SIGKILL.
   stop_timeout_sec: 30

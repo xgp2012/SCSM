@@ -280,7 +280,28 @@ On an empty `users` table, migration seeds `id=1, username=admin, role=admin`
 with `password_hash = store.FirstRunPasswordMarker`. That value is deliberately
 not a valid bcrypt hash, so it can never be matched by a password check; the API
 must detect it (`store.IsFirstRunHash`) and force password setup before serving
-anything else.
+anything else. **That remains the default and the recommended behaviour.**
+
+An operator may opt out of the setup screen by setting `default_admin_password`
+in `config.yaml`. `main.go` then hashes it and calls
+`store.SeedAdminPassword` after `Migrate`. Two properties keep that from becoming
+a footgun, and both are covered by tests:
+
+* The `UPDATE` is conditional on the stored hash still being a first-run marker,
+  so it can **never** overwrite a password set later. Leaving the line in
+  `config.yaml` after the first start is therefore harmless — verified by
+  restarting with the key still present and confirming the changed password
+  still works while the configured one is refused.
+* The value is validated at load time (`config.MinAdminPasswordLength`, 8), so a
+  too-short password fails **before** the database is opened rather than
+  producing a panel nobody can log into.
+
+`Panel.DefaultAdminPassword` is `json:"-"`, blanked by `Panel.Redacted()`, and
+rendered by `Panel.String()` as `(set)`/`(unset)` only. Do not add a path that
+prints it. The length bounds in `internal/config` are copies of
+`internal/auth`'s (importing would invert the dependency direction);
+`TestDefaultAdminPasswordLengthsMatchAuthPolicy` is the tripwire that keeps them
+equal.
 
 ---
 

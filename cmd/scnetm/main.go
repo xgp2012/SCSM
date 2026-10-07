@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"scnetm/internal/auth"
 	"scnetm/internal/config"
 	"scnetm/internal/store"
 	"scnetm/internal/version"
@@ -118,6 +119,42 @@ func run() error {
 	if err := store.Migrate(db); err != nil {
 		return err
 	}
+
+	// Optional: install a known initial administrator password.
+	//
+	// This is empty by default, in which case the seeded admin keeps the
+	// first-run marker and the operator must set a password through the setup
+	// screen. That is the safe default and the one docs/README.md documents.
+	//
+	// When default_admin_password is set, the hash is installed here — and only
+	// while the account still has no password, so a value left in config.yaml
+	// after the first start cannot overwrite a password chosen in the panel.
+	if pw := panel.DefaultAdminPassword; pw != "" {
+		hash, err := auth.HashPassword(pw)
+		if err != nil {
+			// Covers the policy check too, so a weak value fails the start-up
+			// rather than being written to the database.
+			return fmt.Errorf("default_admin_password: %w", err)
+		}
+		n, err := store.SeedAdminPassword(db, store.DefaultAdminUsername, hash)
+		if err != nil {
+			return err
+		}
+		switch n {
+		case 1:
+			// Deliberately does not log the password.
+			logger.Info("已按配置设置管理员初始密码",
+				"username", store.DefaultAdminUsername,
+				"hint", "请登录后立即在面板中修改密码")
+		case 0:
+			// Either the admin already has a password, or the row is gone.
+			// Neither is an error, but silently doing nothing would be
+			// confusing, so it is reported.
+			logger.Info("未设置管理员初始密码：该账户已存在密码，配置值被忽略",
+				"username", store.DefaultAdminUsername)
+		}
+	}
+
 	schemaVersion, err := store.SchemaVersion(db)
 	if err != nil {
 		return err

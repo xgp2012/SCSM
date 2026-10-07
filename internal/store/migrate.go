@@ -33,10 +33,64 @@ const DefaultBusyTimeout = 5 * time.Second
 // still pending and to gate the panel behind it.
 const FirstRunPasswordMarker = "!first-run-password-not-set"
 
+// DefaultAdminUsername is the username of the seeded administrator. It is the
+// default target of SeedAdminPassword and the account the first-run setup flow
+// looks for.
+const DefaultAdminUsername = "admin"
+
 // IsFirstRunHash reports whether hash is the first-run marker, i.e. the admin
 // account exists but no password has been chosen yet.
 func IsFirstRunHash(hash string) bool {
 	return hash == FirstRunPasswordMarker || hash == ""
+}
+
+// SeedAdminPassword sets a password hash on the built-in administrator during
+// bootstrap, instead of leaving the first-run marker in place.
+//
+// It exists so an operator can opt into a known initial password via
+// `default_admin_password` in config.yaml. The default path — calling Migrate
+// and nothing else — still seeds FirstRunPasswordMarker and forces the operator
+// through the first-run setup flow, which is the safer behaviour and remains
+// the one documented in docs/README.md.
+//
+// The update is deliberately conditional on the current hash still being a
+// first-run marker. An operator who has already set a real password must never
+// have it silently overwritten by a config file that still carries the initial
+// value, and re-running the panel after a password change must be a no-op.
+//
+// It returns the number of rows changed: 0 means the admin already had a real
+// password (or no admin row exists), which callers should report rather than
+// treat as a failure.
+func SeedAdminPassword(db *sql.DB, username, passwordHash string) (int, error) {
+	if db == nil {
+		return 0, errors.New("store: SeedAdminPassword called with a nil database")
+	}
+	if username == "" {
+		username = DefaultAdminUsername
+	}
+	if passwordHash == "" {
+		return 0, errors.New("store: SeedAdminPassword called with an empty hash")
+	}
+	if IsFirstRunHash(passwordHash) {
+		return 0, errors.New("store: SeedAdminPassword needs a real hash, not a first-run marker")
+	}
+
+	// The WHERE clause is the safety property: only a row that is still in the
+	// first-run state can be changed. This makes the call idempotent in the
+	// sense that matters — it can never clobber a password someone chose.
+	res, err := db.Exec(`
+		UPDATE users SET password_hash = ?
+		WHERE username = ? AND (password_hash = ? OR password_hash = '')`,
+		passwordHash, username, FirstRunPasswordMarker,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: seed admin password: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: seed admin password: %w", err)
+	}
+	return int(n), nil
 }
 
 // Open opens (creating if needed) the panel database at path and applies the
@@ -184,7 +238,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 // forced first-run flow.
 const seedAdminSQL = `
 INSERT INTO users (id, username, password_hash, role, created_at, disabled)
-SELECT 1, 'admin', ?, 'admin', ?, 0
+SELECT 1, '` + DefaultAdminUsername + `', ?, 'admin', ?, 0
 WHERE NOT EXISTS (SELECT 1 FROM users)
 `
 
