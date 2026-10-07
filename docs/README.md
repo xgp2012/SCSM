@@ -6,11 +6,20 @@ console to the browser, and edits their configuration.
 
 Plan of record: [`SCNETM-开服面板实现计划.md`](../SCNETM-开服面板实现计划.md).
 
-> **Current status: T1 — project skeleton that runs.**
-> The panel boots, migrates its database, serves `/healthz` and serves the
-> embedded frontend. Instance lifecycle, config editing, files, worlds and
-> backups are other agents' packages and are not wired into the router yet
-> (see the marked mount point in `cmd/scnetm/main.go`).
+> **Current status: initial implementation complete and running.**
+> All packages build, vet and test green; the panel boots, migrates its database,
+> serves `/healthz`, serves the embedded frontend, and mounts the full REST +
+> WebSocket API at `/api/v1/*` and `/ws/*`. Features whose backend is a `nop` in
+> this build answer `501 not_implemented` with a `details.reason` rather than
+> silently returning an empty result.
+>
+> **Language policy: the panel is Simplified Chinese (zh-CN).** Every
+> user-facing string — API `message` fields, the `.NET` install guidance, the
+> scheduler notice broadcast into the game, the placeholder page, and the
+> operator logs — is Chinese. Machine-readable identifiers stay English by
+> design: `code` values (`not_implemented`, `conflict`, …), `details.reason`
+> slugs, JSON field names and event names. See
+> [Localization](#localization-zh-cn) before adding a new user-facing string.
 
 ---
 
@@ -63,6 +72,14 @@ make build VERSION=0.2.0
 Plain `go build ./...` also works; it simply embeds whatever is already in
 `internal/webui/dist`.
 
+If `make` is unavailable, do the same thing by hand — the copy is the part that
+matters:
+
+```bash
+mkdir -p internal/webui/dist && cp -a web/dist/. internal/webui/dist/
+CGO_ENABLED=0 go build -trimpath -o build/scnetm ./cmd/scnetm
+```
+
 ## Run
 
 ```bash
@@ -87,7 +104,12 @@ Endpoints:
 |---|---|
 | `GET /healthz` | liveness + version; unauthenticated; no .NET needed |
 | `/` | embedded SPA, with fallback to `index.html` for client-side routes |
-| `/api/v1/*`, `/ws/*` | **not mounted yet** — see `cmd/scnetm/main.go` |
+| `/api/v1/*` | REST API (mounted; see `cmd/scnetm/api.go`) |
+| `/ws/instances/:id/console` | console stream (raw + ANSI); commands are sent here, **not** over REST |
+| `/ws/events` | global panel events (state changes, alerts) |
+
+Console commands travel over the WebSocket as a message frame. There is no REST
+command endpoint — do not add one without reading plan §5.5/§6.6 first.
 
 ## Test
 
@@ -195,44 +217,49 @@ Duplicate or out-of-range ports are rejected.
 
 ```
 cmd/scnetm/main.go          entry point: flags, boot, HTTP, graceful shutdown
+cmd/scnetm/api.go           wires internal/api's Deps and mounts /api/v1 + /ws
 internal/version/           version string + build info (ldflags-injected)
-internal/config/panel.go    panel's own config.yaml loader   [T1]
-internal/store/migrate.go   schema DDL + migration runner    [T1]
-internal/webui/embed.go     go:embed of the built frontend   [T1]
-internal/{api,supervisor,ansi,auth,files,world,config,store}/  other agents
+internal/config/            panel config.yaml + ServerSetting.json/Settings.xml/Project.json
+internal/store/             SQLite: schema DDL, migration runner, repositories
+internal/webui/embed.go     go:embed of the built frontend
+internal/api/               REST + WebSocket handlers, DTOs, auth middleware
+internal/supervisor/        process lifecycle: PTY, state machine, log pipeline
+internal/ansi/              byte-stream framer + ANSI decoder (see ANSI_CONTRACT.md)
+internal/auth/              JWT, bcrypt, RBAC
+internal/files/             path validation, upload, unzip (highest-risk area)
+internal/world/             world scan/import/export/manage
+internal/backup/            backup tiers + retention
+internal/scheduler/         cron jobs (backup, restart, command, announce)
+internal/notify/            webhook channels (DingTalk, WeCom, QQ bot, custom)
+internal/runtime/           .NET discovery + instance template provisioning
 web/                        Vue 3 + Vite frontend
 configs/config.example.yaml annotated config reference
 docs/README.md              this file
 ```
 
-`internal/config` and `internal/store` are shared packages: several agents add
-files to them. `panel.go` and `migrate.go` are the T1-owned files; do not
-rewrite them wholesale.
-
-### Known cleanup item: `internal/supervisor/stub/ansi/`
-
-`internal/supervisor/stub/ansi/` is a **temporary stub** of the `internal/ansi`
-package. It existed only because the supervisor package needed an `ansi.Line`
-type before the real package landed. The real implementation now exists at
-`internal/ansi/ansi.go`, so this stub is dead weight and should be deleted.
-
-It is **not** deleted here because the directory belongs to the supervisor
-owner, and deleting another agent's package mid-flight would break their build.
-The supervisor owner should remove it once `internal/supervisor` imports
-`scnetm/internal/ansi` directly.
+Most packages are self-contained and own their own files. `internal/config` and
+`internal/store` are shared: add new files rather than rewriting existing ones
+wholesale, and keep `panel.go` / `migrate.go` behaviourally stable.
 
 ### Local build environment
 
-`.goenv.sh` at the repo root pins the caches inside the repo so concurrent
-agents share them:
+The repo pins its Go caches locally so they survive across checkouts and do not
+depend on `$HOME` being writable:
 
 ```bash
-source .goenv.sh && go build ./...
+export GOFLAGS=-mod=mod GOSUMDB=off GOPRIVATE='*' GOTOOLCHAIN=local \
+       GOMODCACHE=$PWD/.gomodcache GOCACHE=$PWD/.gocache
+go build ./...
 ```
 
-It sets `GOCACHE`/`GOMODCACHE` to `.gocache/`/`.gomodcache/`, `GOFLAGS=-mod=mod`
-(so builds may update `go.mod`), `GOSUMDB=off` and `GOTOOLCHAIN=local`. Those
-directories are git-ignored.
+`.gocache/` and `.gomodcache/` are git-ignored. `GOTOOLCHAIN=local` stops Go
+from trying to download a different toolchain — the sandbox has no network for
+that. A `.goenv.sh` helper that did the same thing used to live at the repo root;
+it is gone, so set these explicitly (or add your own untracked `.goenv.sh`).
+
+**The first build after a fresh clone is slow** (several minutes): the module
+cache is empty and every dependency is fetched. It can look like a hang. Give it
+a generous timeout rather than assuming a deadlock.
 
 ---
 
@@ -254,6 +281,53 @@ with `password_hash = store.FirstRunPasswordMarker`. That value is deliberately
 not a valid bcrypt hash, so it can never be matched by a password check; the API
 must detect it (`store.IsFirstRunHash`) and force password setup before serving
 anything else.
+
+---
+
+## Localization (zh-CN)
+
+The panel speaks Simplified Chinese. There is **no i18n framework** — no
+`vue-i18n`, no `locales/` directory, no message catalogue. Strings are written
+inline in the language they are served in. This is a deliberate choice for a
+single-language product; do not introduce an i18n layer without a second locale
+actually being required.
+
+### What must be Chinese
+
+| Surface | Where |
+|---|---|
+| API error/notice `message` | `internal/api/*.go` — `BadRequest`, `Conflict`, `NotFound`, `Forbidden`, `Unavailable`, `Timeout`, `PayloadTooLarge`, `ValidationFailed`, `NotImplemented` |
+| Sentinel errors rendered via `Classify` | `internal/api/deps.go`, `internal/api/safepath.go`, `internal/api/supervisor.go` |
+| Operator guidance | `internal/runtime/dotnet.go` (`InstallHint`), `internal/api/system.go` |
+| Player-visible broadcast | `internal/scheduler/scheduler.go` (sent into the game) |
+| Placeholder page | `internal/webui/embed.go` (`PlaceholderPage`) |
+| Operator logs | `cmd/scnetm/*.go`, `internal/api/middleware.go` |
+| Frontend | `web/src/**` — already fully zh-CN, including `Message.*` toasts |
+
+### What must stay English
+
+These are contracts, not prose. Translating them breaks clients and tests:
+
+* **`code` values** — `not_implemented`, `conflict`, `unauthorized`, … The
+  comment on `CodeInternal` in `internal/api/errors.go` states the rule: codes are
+  stable so clients keep working *even if messages are reworded*.
+* **`details.reason` slugs** — `path_traversal`, `absolute_path`, `null_byte`, …
+* **`internal/files` `Reason*` constants** — `traversal`, `unsafe-name`, …
+* **Event names** — `term.redirected`, `server.listening`, `world.loaded`, …
+* **JSON field names, YAML keys, CLI flags, URL paths.**
+* **Font names** in `web/src/components/console/XtermTerminal.vue` — `Cascadia
+  Mono`, `Liberation Mono` must match real installed fonts.
+
+### Rules when adding a string
+
+1. Write the user-facing text in Chinese directly; do not add a translation key.
+2. Never change a `code`, `reason` or event name to "match" a reworded message.
+3. Keep `%s` / `%q` / `%d` verbs intact — several messages interpolate instance
+   names, ports and states.
+4. If a test asserts the message text, assert on the **intent** in Chinese (e.g.
+   `strings.Contains(msg, "停止")` for "tells the operator to stop"), not on a
+   full sentence — wording will change again.
+5. Run `gofmt -l ./cmd ./internal` and `go test ./...` before committing.
 
 ---
 

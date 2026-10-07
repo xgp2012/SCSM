@@ -1360,12 +1360,16 @@ setup-required → POST /auth/setup → POST /auth/login → GET /auth/me
 
 **阶段 1（MVP 全量实现）已完成并可运行；阶段 0（V0-1~V0-7 运行时验证）完成度约 30%，未完成部分已明确标注。**
 
-前 12 个任务（T1–T10）全部交付，13 个包测试全绿，生产二进制实测跑通完整链路。V0 验证因**中途才发现本机已有 .NET 10 与真实服务端**，只跑出了 V0-1/V0-2 的实测数据，其余 5 项的结构已就绪但结论未填。
+前 12 个任务（T1–T10）全部交付，13 个包测试全绿，生产二进制实测跑通完整链路。V0 验证因**中途才发现本机已有 .NET 10 与真实服务端**，只跑出了 V0-1/V0-2 的实测数据，其余 5 项的结构已就绪但结论未填——**该"结论未填"已于 2026-10-06 补齐**，见 E.8。
+
+**界面语言**：面板已**全面简中化**（用户可见文案、运维指引、运行时日志均为简体中文；
+`code`/`reason`/事件名等机器可读标识保持英文）。约定见 `docs/README.md` 的
+「Localization (zh-CN)」一节。
 
 ### E.2 如何跑起来（三步，已实测）
 
 ```bash
-cd /home/xgp2012/SCNETM
+cd /home/xgp2012/SCSM        # 本仓库的实际路径（旧文档写作 SCNETM，已不存在）
 
 # 0) 必须：本机 ~/go/pkg/mod 不可写，Go 环境需重定向
 export GOFLAGS=-mod=mod GOSUMDB=off GOPRIVATE='*' GOTOOLCHAIN=local \
@@ -1374,10 +1378,15 @@ export GOFLAGS=-mod=mod GOSUMDB=off GOPRIVATE='*' GOTOOLCHAIN=local \
 # 1) 构建（注意：必须用 make，不能用裸 go build）
 make build            # 会先把 web/dist 拷进 internal/webui/dist 再编译
                       # 裸 go build 会静默内嵌一个占位页，这不是 bug 是设计
+                      # 若本机没有 make：手动 cp web/dist/. internal/webui/dist/
+                      #   然后 CGO_ENABLED=0 go build -trimpath -o build/scnetm ./cmd/scnetm
 
 # 2) 启动（8080 被无关应用 Licode 占用，务必换端口）
 ./build/scnetm --listen 127.0.0.1:34550 --data-dir /tmp/scnetm-data
 ```
+
+> **首次编译会很慢**（数分钟）：模块缓存为空，需拉取全部依赖，看起来像卡死。
+> 给足超时，不要误判为死锁。`.goenv.sh` 已不存在，上面的环境变量需显式设置。
 
 **首次使用流程**（实测通过）：
 ```
@@ -1446,15 +1455,39 @@ backup 83.7% | world 79.3% | api 全路由 | web type-check 零错
 
 ### E.7 建议的下一步（按投入产出排序）
 
+> **⚠️ [前置] 先区分"没测"与"不能测"。** PTY 是**唯一**的硬阻塞；
+> 下列 1–3 项都**不需要 PTY**，属"能测而未测"。不要把它们误记为环境限制。
+
 1. **复核"停止是否落盘"**（B 级矛盾，最高优先）—— 它决定备份策略是"保险"还是"必需"。
+   两条观测（`PROJ advanced: NO / BAK advanced: NO` 与"`Project.json` 晚于 `.bak`"）
+   **不可同时为真**，需以"可区分内存态与磁盘态"的世界改动重测。可与下面第 6 项合并。
 2. **跑完 V0-6（GameMode）** —— 纯枚举、最快、独立，能直接消掉计划里唯一的推断标注。方法见 §10 与 `docs/验证报告.md`。
 3. **跑完 V0-5（配置优先级）** —— 影响"改配置不生效"这类最烦人的用户投诉。
+   **其中"重叠字段谁赢"是首要待测项**：它决定 §6.3.1 是否需要修订。
 4. **封闭指令通道结论** —— 服务端不自建 FIFO 已确认；需判定"预创建 FIFO"与 `--enhanced` 两条路是否可行。**若均不可行，则 §5.3 的兜底方案 C 应从"长期正解"升级为"近期必需"**，因为玩家管理/广播/踢人与彩色绑定在同一前提上。
 5. **搞定 PTY**：把执行用户加入 `docker` 组（一次性解锁最大验证面），或在真实目标环境验证。判定实验：非沙箱会话执行 `python3 -c 'import pty; pty.openpty()'`。
+6. **补做 V0-3 的裸机部分**（成本最低）—— `.NET` 与发行物**均已就位**，
+   `/tmp/scnetsrv/net10.0/` 上跑一次 `start.sh` 即可，属**执行遗漏**而非环境限制。
 
 ### E.8 未完成的验证与遗留物
 
-- `docs/验证报告.md`（488 行）：**结构完整、7 个任务章节齐全，但 8 处 `结论：` 字段为空**——那是脚手架，不是结果。V0-1/V0-2 的实测数据在 `/tmp/v0/`（`v01_fifo.log`、`v02_direct.log`）与探针 `scripts/v0/`。
+- ~~`docs/验证报告.md`：8 处 `结论：` 字段为空~~ → **已补填（2026-10-06）**。全部 `结论：` 字段
+  已按附录 D 的实测数据填写，并新增**「结论汇总（按可信度分级）」**表与
+  **「当前可立即推进 / 仍被阻塞」**两张表。未实测项一律写 `未验证`，未从邻近结论外推。
+  同时修订了该文档 §0 状态总表与 §0.1 阻塞原因表（原表称 V0-1/2/4/6/7 全部阻塞，
+  与附录 D 的实测数据矛盾）。V0-1/V0-2 的原始数据仍在 `/tmp/v0/`（`v01_fifo.log`、
+  `v02_direct.log`）与探针 `scripts/v0/`。
+- **`docs/环境与可运行性验证.md` §6 已同步**（该文档 §0 附录第 7 条要求二者保持一致）。
+  原 §2.2「无服务端发行物」与 §6 阻塞表的「无 .NET + 无服务端」结论**已过时**，
+  现已加修订说明并保留原文以备追溯：`find` 只搜了 `.`/`/opt`/`/srv` 限深 4 层，
+  而实物在 `/tmp` 下；`which dotnet` 只查 `PATH`。**教训：不要用 `which` 或受限
+  `find` 断言某运行时/发行物"不存在"。**
+- **`docs/README.md` 已大幅更新**：原「Current status: T1 — 项目骨架」与
+  「`/api/v1/*`、`/ws/*` not mounted yet」两处**均已过时**（API 早已挂载）；
+  已删除「`internal/supervisor/stub/ansi/` 待清理」整节（该目录**已不存在**）；
+  `.goenv.sh` 引用已移除（文件已不存在，改用显式环境变量）；
+  新增 **「Localization (zh-CN)」** 一节，约定用户可见文案用中文、
+  机器可读标识（`code`/`reason`/事件名/JSON 键）保持英文。
 - `internal/world/config_parity_test.go:143-147` 的注释仍声称 `config.PathSegment` 缺 NUL 防护——**该注释已过时**（测试通过，防护已加）。属他人文件，未改动。
 - `files` 包的 `Mkdir`/`Rename`/`Delete` 存在 TOCTOU 残余风险（仅可移植路径分支；读取路径用 `openat2` + `RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS` 已安全）。
 - 计划 §13.2 的"10 实例"是**默认假设**，无真实硬件规格支撑。
