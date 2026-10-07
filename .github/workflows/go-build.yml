@@ -1,8 +1,9 @@
-name: Go Build
+name: Go Build & Release
 
-# Builds the SCNETM panel as a self-contained Linux x86-64 binary.
+# Builds the SCNETM panel as a self-contained Linux x86-64 binary, and publishes
+# it as a GitHub release when a v* tag is pushed.
 #
-# Two things about this project make the ordering below load-bearing:
+# Four things about this project make the ordering below load-bearing:
 #
 #   1. The frontend must be built and copied into internal/webui/dist BEFORE
 #      `go build` runs. go:embed cannot reference ../../web/dist, so the binary
@@ -13,10 +14,21 @@ name: Go Build
 #   2. CGO is disabled. The SQLite driver is modernc.org/sqlite, a pure-Go
 #      translation, so the result is a static binary with no libc/libsqlite3
 #      dependency.
+#   3. Release notes are written from body_path, NOT generate_release_notes.
+#      That feature summarises merged pull requests and lists contributors; this
+#      repository has no PRs and a linear history, so it emits a single
+#      "Full Changelog" line and nothing else. Measured on the v0.2.0 release:
+#      66 bytes of body. RELEASE_NOTES.md is generated below instead.
+#   4. The tag must match the version compiled into the binary. VERSION is fed
+#      from GITHUB_REF_NAME, and a step asserts --version reports exactly that
+#      string. A mismatch would ship a v0.2.0 release whose binary says
+#      something else.
 
 on:
   push:
-    branches: ['**']
+    # Full build + artifact upload is limited to main and tags. Feature branches
+    # still run the verify/test job, but do not upload 16 MB artifacts apiece.
+    branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -39,9 +51,43 @@ env:
   # web/package.json, so the version is declared in exactly one place.
 
 jobs:
+  # ---- Fast feedback: Go static analysis and tests, no Node involved --------
+  # Split out so a Go regression fails in ~1 minute instead of waiting behind
+  # the frontend dependency install and Vite build.
+  verify:
+    name: Verify (fmt, vet, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt reported unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+  # ---- Assemble the release binary -----------------------------------------
   build:
     name: Build linux/amd64
     runs-on: ubuntu-latest
+    needs: [verify]
     # Elevated from the workflow-level contents:read so that the release step can
     # create a release and upload assets when this run was triggered by a v* tag.
     # A build triggered by a branch push or pull request never reaches that step,
@@ -77,21 +123,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # ---- Go: static analysis and tests (fast, fail early) -------------------
-      - name: Verify formatting
-        run: |
-          unformatted="$(gofmt -l ./cmd ./internal)"
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt reported unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: go vet
-        run: go vet ./...
-
-      - name: go test
-        run: go test ./...
+      # ---- Release gate: race detector (tags only) ---------------------------
+      # Race detection is the expensive check, so it runs only when a release is
+      # actually being cut. supervisor and ansi are the concurrency-heavy
+      # packages; a data race there corrupts the console stream under load.
+      - name: go test -race (release gate)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: go test -race ./...
 
       # ---- Frontend ----------------------------------------------------------
       - name: Install frontend dependencies
@@ -156,10 +194,7 @@ jobs:
 
       - name: Verify tagged release version matches the binary
         # On a v* tag push the release is published under that tag, so the
-        # version compiled into the binary must be the same string. VERSION is
-        # fed from GITHUB_REF_NAME; this asserts the two never drift apart, which
-        # would otherwise ship a v0.2.0 release whose --version says something
-        # else entirely.
+        # version compiled into the binary must be the same string.
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
@@ -245,15 +280,126 @@ jobs:
           ls -lh dist
           cat dist/SHA256SUMS
 
+      # ---- Release notes -----------------------------------------------------
+      # Written from a template, not generated from PRs (see header note 3).
+      # Every claim below is asserted against the real artefact or taken from
+      # the docs; nothing here is aspirational. The known-limitations section is
+      # deliberately blunt: docs/验证报告.md grades each conclusion A/B/C/D and
+      # forbids promoting a B or C to A, so the release note echoes that.
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          short_sha="$(git rev-parse --short HEAD)"
+          size="$(du -h dist/scnetm-linux-amd64 | cut -f1)"
+          sha="$(awk '$2=="scnetm-linux-amd64"{print $1}' dist/SHA256SUMS)"
+          # Publishing an empty checksum would be worse than failing: the release
+          # note is the one place a user is told what to expect. The packaging
+          # step already wrote this line, so an empty value means something
+          # upstream changed and the operator needs to know.
+          if [ -z "$sha" ]; then
+            echo "::error::could not read scnetm-linux-amd64 from dist/SHA256SUMS"
+            cat dist/SHA256SUMS
+            exit 1
+          fi
+
+          # Previous tag, so the changelog is a real range rather than a link.
+          prev="$(git describe --tags --abbrev=0 "${version}^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then
+            range="${prev}..${version}"
+          else
+            range="${version}"
+          fi
+
+          {
+            echo "SCNETM 面板 ${version} — Linux x86-64 静态二进制（$size）。"
+            echo
+            echo "## 下载"
+            echo
+            echo '| 文件 | 说明 |'
+            echo '|---|---|'
+            echo '| `scnetm-linux-amd64` | 裸二进制，可直接运行 |'
+            echo '| `scnetm-linux-amd64.tar.gz` | 含二进制、`config.example.yaml`、`scnetm.service`、`README.md` |'
+            echo '| `SHA256SUMS` | 上述两个文件的校验和 |'
+            echo
+            echo "## 校验"
+            echo
+            echo '```bash'
+            echo "curl -sSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${version}/SHA256SUMS"
+            echo "curl -sSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${version}/scnetm-linux-amd64"
+            echo "sha256sum -c SHA256SUMS"
+            echo '```'
+            echo
+            echo "本二进制 \`scnetm-linux-amd64\` 的 SHA-256：\`${sha}\`"
+            echo
+            echo "## 运行"
+            echo
+            echo '```bash'
+            echo "./scnetm-linux-amd64 --listen 0.0.0.0:7000 --data-dir /srv/scnetm"
+            echo '```'
+            echo
+            echo "首次启动会建库并迁移，然后访问 \`/healthz\` 确认存活。"
+            echo "默认监听 \`0.0.0.0:7000\`（**面板自身无 TLS**，公网暴露前请在前面加反向代理终止 TLS）。"
+            echo
+            echo "## 环境要求"
+            echo
+            echo "- **面板本身**：无需 .NET、无需游戏服务端，任何 Linux x86-64 均可启动。"
+            echo "- **启动游戏实例**：需要 .NET 10 运行时（\`Microsoft.NETCore.App\`，**不是** SDK）"
+            echo "  与解包后的服务端发行物（\`Survivalcraft.dll\`、\`Content.scpak\`），"
+            echo "  用 \`template_dir\` 指向后者。二者缺失时面板照常运行，只有启动实例会报错。"
+            echo
+            echo "## 已知限制"
+            echo
+            echo "以下为**未经运行时验证**的部分，请勿当作已确认能力："
+            echo
+            echo "- **PTY 彩色输出与指令通道未验证**。服务端只有在真实 PTY 下才输出 ANSI 颜色并"
+            echo "  接受 stdin 指令；管道模式已实测**无色且指令无响应**。无 PTY 时面板自动降级为"
+            echo "  无色模式并在界面告警，但玩家列表 / 广播 / 踢人这类功能依赖指令通道，"
+            echo "  在确认 PTY 可用前**不可用**。"
+            echo "- **GameMode 映射为推断值**。除 \`1=Harmless\` 经实测外，其余取值未逐个验证。"
+            echo "- **停止时存档是否落盘尚无定论**。实测中 \`/stop\` 与 Ctrl+C 均无效，"
+            echo "  只有 SIGTERM 能在超时内终止进程；但两次落盘观测相互矛盾。"
+            echo "  面板保留「启动前强制备份」策略作为兜底。"
+            echo "- **Dockerfile 未经构建验证**（容器化部署请自行验证后再上生产）。"
+            echo
+            echo "详见 \`docs/验证报告.md\`（结论按 A/B/C/D 分级）。"
+            echo
+            echo "## 本次变更"
+            echo
+            if [ -n "$prev" ]; then
+              echo "自 \`${prev}\` 以来的提交："
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' "${range}"
+              echo
+              echo
+              echo "完整对比：https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${version}"
+            else
+              echo "首次发布，无前序 tag 可对比。"
+              echo
+              echo "完整提交记录：https://github.com/${GITHUB_REPOSITORY}/commits/${version}"
+            fi
+            echo
+            echo "---"
+            echo
+            echo "构建于 ${short_sha} · $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > RELEASE_NOTES.md
+
+          echo "----- RELEASE_NOTES.md -----"
+          cat RELEASE_NOTES.md
+
       - name: Upload build artifact
+        # Only main and tags keep artifacts; PR runs verify without storing 16 MB.
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: scnetm-linux-amd64
+          name: scnetm-linux-amd64-${{ github.sha }}
           path: |
             dist/scnetm-linux-amd64
             dist/scnetm-linux-amd64.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
+          retention-days: 14
 
       # ---- Release (tags only) ----------------------------------------------
       - name: Create release
@@ -264,7 +410,7 @@ jobs:
             dist/scnetm-linux-amd64
             dist/scnetm-linux-amd64.tar.gz
             dist/SHA256SUMS
-          generate_release_notes: true
-          # Fail loudly instead of silently doing nothing. Without this a typo in
-          # the paths above produces an empty release that still looks successful.
+          body_path: RELEASE_NOTES.md
+          # Do NOT set generate_release_notes — it would append a PR-derived
+          # section that is always empty here (header note 3).
           fail_on_unmatched_files: true
